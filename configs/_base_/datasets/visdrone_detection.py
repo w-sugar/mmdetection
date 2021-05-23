@@ -17,9 +17,9 @@ test_pipeline = [
     dict(type='LoadImageFromFile'),
     dict(
         type='MultiScaleFlipAug',
-        # img_scale=[(1333, 800), (1333*1.5, 800*1.5), (1333 * 2, 800 * 2), (1333*2.5, 800 *2.5), (1333*3, 800*3), (1333*3.5, 800*3.5)],
+        img_scale=[(1333, 800), (1333*1.5, 800*1.5), (1333 * 2, 800 * 2), (1333*2.5, 800 *2.5), (1333*3, 800*3), (1333*3.5, 800*3.5)],
         # img_scale=[(1333, 800),(1333*3, 800*3)],
-        img_scale=[(1333, 800), (1333*1.5, 800*1.5), (1333 * 2, 800 * 2)],
+        # img_scale=[(1333, 800), (1333*1.5, 800*1.5), (1333 * 2, 800 * 2)],
         # img_scale=(1333, 800),
         flip=False,
         transforms=[
@@ -46,11 +46,11 @@ data = dict(
         pipeline=test_pipeline),
     test=dict(
         type=dataset_type,
-        ann_file=data_root + 'annotations/coco-cut_test-dev.json',
+        # ann_file=data_root + 'annotations/coco-cut_test-dev.json',
         # ann_file='/home/sugar/workspace/dyh/coco-mod10-test-dev-iscrowd.json',
-        # ann_file=data_root + 'annotations/coco-test-dev.json',
+        ann_file=data_root + 'annotations/coco-test-dev.json',
         # img_prefix=data_root + 'images/VisDrone2019-DET-train/images',
         # img_prefix='/home/sugar/workspace/dyh//sequences',
-        img_prefix=data_root + 'images/VisDrone2019-DET-test-dev/images-cut',
+        img_prefix=data_root + 'images/VisDrone2019-DET-test-dev/images',
         pipeline=test_pipeline))
 evaluation = dict(interval=1, metric='bbox')

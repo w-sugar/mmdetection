@@ -80,9 +80,11 @@ class BFP(BaseModule):
             else:
                 gathered = F.interpolate(
                     inputs[i], size=gather_size, mode='nearest')
-            feats.append(gathered)
+            # feats.append(gathered)
+            feats.append(gathered * 1 / (i + 1))
 
-        bsf = sum(feats) / len(feats)
+        # bsf = sum(feats) / len(feats)
+        bsf = sum(feats)
 
         # step 2: refine gathered features
         if self.refine_type is not None:
@@ -96,6 +98,7 @@ class BFP(BaseModule):
                 residual = F.interpolate(bsf, size=out_size, mode='nearest')
             else:
                 residual = F.adaptive_max_pool2d(bsf, output_size=out_size)
-            outs.append(residual + inputs[i])
+            # outs.append(residual + inputs[i])
+            outs.append(residual * i / (i + 1) + inputs[i])
 
         return tuple(outs)
