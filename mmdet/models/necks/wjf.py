@@ -4,10 +4,11 @@ from mmcv.cnn.bricks import NonLocal2d
 from mmcv.runner import BaseModule
 
 from ..builder import NECKS
+from torch import nn
 
 
 @NECKS.register_module()
-class BFP(BaseModule):
+class WJF(BaseModule):
     """BFP (Balanced Feature Pyrmamids)
 
     BFP takes multi-level features as inputs and gather them into a single one,
@@ -33,13 +34,11 @@ class BFP(BaseModule):
                  in_channels,
                  num_levels,
                  refine_level=2,
-                 refine_type=None,
                  conv_cfg=None,
                  norm_cfg=None,
                  init_cfg=dict(
                      type='Xavier', layer='Conv2d', distribution='uniform')):
-        super(BFP, self).__init__(init_cfg)
-        assert refine_type in [None, 'conv', 'non_local']
+        super(WJF, self).__init__(init_cfg)
 
         self.in_channels = in_channels
         self.num_levels = num_levels
@@ -47,28 +46,20 @@ class BFP(BaseModule):
         self.norm_cfg = norm_cfg
 
         self.refine_level = refine_level
-        self.refine_type = refine_type
         assert 0 <= self.refine_level < self.num_levels
+        
+        self.self_attn1 = nn.MultiheadAttention(256, 8, dropout=0.1)
+        self.dropout1 = nn.Dropout(0.1)
+        self.norm1 = nn.LayerNorm(256)
 
-        if self.refine_type == 'conv':
-            self.refine = ConvModule(
-                self.in_channels,
-                self.in_channels,
-                3,
-                padding=1,
-                conv_cfg=self.conv_cfg,
-                norm_cfg=self.norm_cfg)
-        elif self.refine_type == 'non_local':
-            self.refine = NonLocal2d(
-                self.in_channels,
-                reduction=1,
-                use_scale=False,
-                conv_cfg=self.conv_cfg,
-                norm_cfg=self.norm_cfg)
+        self.self_attn2 = nn.MultiheadAttention(256, 8, dropout=0.1)
+        self.dropout2 = nn.Dropout(0.1)
+        self.norm2 = nn.LayerNorm(256)
 
     def forward(self, inputs):
         """Forward function."""
         assert len(inputs) == self.num_levels
+        b, c, h, w = inputs[self.refine_level].shape
 
         # step 1: gather multi-level features by resize and average
         feats = []
@@ -80,15 +71,23 @@ class BFP(BaseModule):
             else:
                 gathered = F.interpolate(
                     inputs[i], size=gather_size, mode='nearest')
+            gathered = gathered.flatten(2).permute(2, 0, 1)
             feats.append(gathered)
-            # feats.append(gathered * 1 / (i + 1))
 
-        bsf = sum(feats) / len(feats)
-        # bsf = sum(feats)
+        # bsf = sum(feats) / len(feats)
 
-        # step 2: refine gathered features
-        if self.refine_type is not None:
-            bsf = self.refine(bsf)
+        # self_attention c2-c4
+        pro_features2 = self.self_attn1(feats[0], feats[1], value=feats[2])[0]
+        pro_features = feats[2] + self.dropout1(pro_features2)
+        pro_features = self.norm1(pro_features)
+
+        # self_attention c4-c6
+        pro_features2 = self.self_attn2(feats[3], feats[4], value=pro_features)[0]
+        pro_features = pro_features + self.dropout2(pro_features2)
+        bsf = self.norm2(pro_features)
+
+        # reshape
+        bsf = bsf.permute(1, 2, 0).view(b, c, h, w)
 
         # step 3: scatter refined features to multi-levels by a residual path
         outs = []
