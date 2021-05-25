@@ -21,6 +21,12 @@ model = dict(
             in_channels=256,
             num_levels=5,
             refine_level=2)],
+        # dict(
+        #     type='BFP',
+        #     in_channels=256,
+        #     num_levels=5,
+        #     refine_level=2,
+        #     refine_type='non_local')],
     rpn_head=dict(
         type='RPNHead',
         in_channels=256,

@@ -52,12 +52,13 @@ class WJF(BaseModule):
         self.dropout1 = nn.Dropout(0.1)
         self.norm1 = nn.LayerNorm(256)
 
-        self.self_attn2 = nn.MultiheadAttention(256, 8, dropout=0.1)
-        self.dropout2 = nn.Dropout(0.1)
-        self.norm2 = nn.LayerNorm(256)
+        # self.self_attn2 = nn.MultiheadAttention(256, 8, dropout=0.1)
+        # self.dropout2 = nn.Dropout(0.1)
+        # self.norm2 = nn.LayerNorm(256)
 
     def forward(self, inputs):
         """Forward function."""
+        inputs, gt_bboxes = inputs
         assert len(inputs) == self.num_levels
         b, c, h, w = inputs[self.refine_level].shape
 
@@ -77,14 +78,19 @@ class WJF(BaseModule):
         # bsf = sum(feats) / len(feats)
 
         # self_attention c2-c4
-        pro_features2 = self.self_attn1(feats[0], feats[1], value=feats[2])[0]
-        pro_features = feats[2] + self.dropout1(pro_features2)
+        pro_features = self.self_attn1(feats[0], feats[2], value=feats[1])[0]
+        pro_features = feats[1] + self.dropout1(pro_features)
         pro_features = self.norm1(pro_features)
 
         # self_attention c4-c6
-        pro_features2 = self.self_attn2(feats[3], feats[4], value=pro_features)[0]
-        pro_features = pro_features + self.dropout2(pro_features2)
-        bsf = self.norm2(pro_features)
+        pro_features2 = self.self_attn1(feats[2], feats[4], value=feats[3])[0]
+        pro_features2 = feats[3] + self.dropout1(pro_features2)
+        pro_features2 = self.norm1(pro_features2)
+
+        # self_attention c3-c5
+        pro_features3 = self.self_attn1(pro_features, pro_features2, value=feats[2])[0]
+        pro_features3 = feats[2] + self.dropout1(pro_features3)
+        bsf = self.norm1(pro_features3)
 
         # reshape
         bsf = bsf.permute(1, 2, 0).view(b, c, h, w)
@@ -100,4 +106,5 @@ class WJF(BaseModule):
             outs.append(residual + inputs[i])
             # outs.append(residual * 1 / (i + 1) + inputs[i])
 
-        return tuple(outs)
+        # return tuple(outs)
+        return tuple(outs), None

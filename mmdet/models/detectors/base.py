@@ -46,7 +46,7 @@ class BaseDetector(BaseModule, metaclass=ABCMeta):
         """Extract features from images."""
         pass
 
-    def extract_feats(self, imgs):
+    def extract_feats(self, imgs, gt_bboxes=None):
         """Extract features from multiple images.
 
         Args:
@@ -57,7 +57,7 @@ class BaseDetector(BaseModule, metaclass=ABCMeta):
             list[torch.Tensor]: Features of different images
         """
         assert isinstance(imgs, list)
-        return [self.extract_feat(img) for img in imgs]
+        return [self.extract_feat(img, gt_bboxes)[0] for img in imgs]
 
     def forward_train(self, imgs, img_metas, **kwargs):
         """

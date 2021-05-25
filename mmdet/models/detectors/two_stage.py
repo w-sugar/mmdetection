@@ -56,12 +56,12 @@ class TwoStageDetector(BaseDetector):
         """bool: whether the detector has a RoI head"""
         return hasattr(self, 'roi_head') and self.roi_head is not None
 
-    def extract_feat(self, img):
+    def extract_feat(self, img, gt_bboxes=None):
         """Directly extract features from the backbone+neck."""
         x = self.backbone(img)
         if self.with_neck:
-            x = self.neck(x)
-        return x
+            x, loss_mask = self.neck((x, gt_bboxes))
+        return x, loss_mask
 
     def forward_dummy(self, img):
         """Used for computing network flops.
@@ -118,9 +118,11 @@ class TwoStageDetector(BaseDetector):
         Returns:
             dict[str, Tensor]: a dictionary of loss components
         """
-        x = self.extract_feat(img)
+        x, loss_mask = self.extract_feat(img, gt_bboxes)
 
         losses = dict()
+        if loss_mask is not None:
+            losses.update(loss_mask)
 
         # RPN forward and loss
         if self.with_rpn:
@@ -167,7 +169,7 @@ class TwoStageDetector(BaseDetector):
         """Test without augmentation."""
         assert self.with_bbox, 'Bbox head must be implemented.'
 
-        x = self.extract_feat(img)
+        x, _ = self.extract_feat(img, None)
 
         # get origin input shape to onnx dynamic input shape
         if torch.onnx.is_in_onnx_export():
@@ -188,7 +190,7 @@ class TwoStageDetector(BaseDetector):
         If rescale is False, then returned bboxes and masks will fit the scale
         of imgs[0].
         """
-        x = self.extract_feats(imgs)
+        x = self.extract_feats(imgs, None)
         proposal_list = self.rpn_head.aug_test_rpn(x, img_metas)
         return self.roi_head.aug_test(
             x, proposal_list, img_metas, rescale=rescale)

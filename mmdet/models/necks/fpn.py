@@ -165,6 +165,7 @@ class FPN(BaseModule):
     @auto_fp16()
     def forward(self, inputs):
         """Forward function."""
+        inputs, gt_bboxes = inputs
         assert len(inputs) == len(self.in_channels)
 
         # build laterals
@@ -214,4 +215,4 @@ class FPN(BaseModule):
                         outs.append(self.fpn_convs[i](F.relu(outs[-1])))
                     else:
                         outs.append(self.fpn_convs[i](outs[-1]))
-        return tuple(outs)
+        return (tuple(outs), gt_bboxes)

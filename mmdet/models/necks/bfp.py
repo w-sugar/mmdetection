@@ -4,7 +4,73 @@ from mmcv.cnn.bricks import NonLocal2d
 from mmcv.runner import BaseModule
 
 from ..builder import NECKS
+import torch
+from ..losses import SmoothL1Loss
 
+def gaussian2D(radius_x, radius_y, sigma_x=1, sigma_y=1, dtype=torch.float32, device='cpu'):
+    """Generate 2D gaussian kernel.
+
+    Args:
+        radius (int): Radius of gaussian kernel.
+        sigma (int): Sigma of gaussian function. Default: 1.
+        dtype (torch.dtype): Dtype of gaussian tensor. Default: torch.float32.
+        device (str): Device of gaussian tensor. Default: 'cpu'.
+
+    Returns:
+        h (Tensor): Gaussian kernel with a
+            ``(2 * radius + 1) * (2 * radius + 1)`` shape.
+    """
+    x = torch.arange(
+        -radius_x, radius_x + 1, dtype=dtype, device=device).view(1, -1)
+    y = torch.arange(
+        -radius_y, radius_y + 1, dtype=dtype, device=device).view(-1, 1)
+
+    h = (-(x * x + y * y) / (2 * sigma_x * sigma_y)).exp()
+
+    h[h < torch.finfo(h.dtype).eps * h.max()] = 0
+    return h
+
+
+def gen_gaussian_target(heatmap, center, radius_x, radius_y, k=1):
+    """Generate 2D gaussian heatmap.
+
+    Args:
+        heatmap (Tensor): Input heatmap, the gaussian kernel will cover on
+            it and maintain the max value.
+        center (list[int]): Coord of gaussian kernel's center.
+        radius (int): Radius of gaussian kernel.
+        k (int): Coefficient of gaussian kernel. Default: 1.
+
+    Returns:
+        out_heatmap (Tensor): Updated heatmap covered by gaussian kernel.
+    """
+    radius_x = int(radius_x)
+    radius_y = int(radius_y)
+    diameter_x = 2 * radius_x + 1
+    diameter_y = 2 * radius_y + 1
+
+    gaussian_kernel = gaussian2D(
+        radius_x, radius_y, sigma_x=diameter_x / 6, sigma_y=diameter_y / 6, dtype=heatmap.dtype, device=heatmap.device)
+
+    x, y = center
+    x = int(x)
+    y = int(y)
+
+    height, width = heatmap.shape[:2]
+
+    left, right = min(x, radius_x), min(width - x, radius_x + 1)
+    top, bottom = min(y, radius_y), min(height - y, radius_y + 1)
+
+    masked_heatmap = heatmap[y - top:y + bottom, x - left:x + right]
+    masked_gaussian = gaussian_kernel[radius_y - top:radius_y + bottom,
+                                      radius_x - left:radius_x + right]
+    out_heatmap = heatmap
+    torch.max(
+        masked_heatmap,
+        masked_gaussian * k,
+        out=out_heatmap[y - top:y + bottom, x - left:x + right])
+
+    return out_heatmap
 
 @NECKS.register_module()
 class BFP(BaseModule):
@@ -65,8 +131,18 @@ class BFP(BaseModule):
                 use_scale=False,
                 conv_cfg=self.conv_cfg,
                 norm_cfg=self.norm_cfg)
+        self.maskconv = ConvModule(
+            self.in_channels,
+            1,
+            3,
+            padding=1,
+            conv_cfg=self.conv_cfg,
+            norm_cfg=self.norm_cfg
+        )
+        self.loss_mask = SmoothL1Loss(beta=1.0 / 9.0, loss_weight=1.0)
 
     def forward(self, inputs):
+        inputs, gt_bboxes = inputs
         """Forward function."""
         assert len(inputs) == self.num_levels
 
@@ -89,6 +165,24 @@ class BFP(BaseModule):
         # step 2: refine gathered features
         if self.refine_type is not None:
             bsf = self.refine(bsf)
+        if gt_bboxes is not None:
+            heatmaps = []
+            for gt_bbox in gt_bboxes:
+                heatmap = torch.zeros([bsf.shape[2], bsf.shape[3]], device=gt_bboxes[0].device)
+                center = (gt_bbox / 16)
+                Ws = center[:, 2] - center[:, 0]
+                Hs = center[:, 3] - center[:, 1]
+                center = center[:, :2] + (center[:, 2:] - center[:, :2]) / 2
+                center = torch.clamp(center, 0)
+                for cen, w, h in zip(center, Ws, Hs):
+
+                    heatmap = gen_gaussian_target(heatmap, cen, w/2, h/2)
+                heatmaps.append(heatmap)
+            heatmaps = torch.stack(heatmaps)
+            bsf_mask = self.maskconv(bsf).squeeze(1)
+            loss_mask = self.loss_mask(bsf_mask, heatmaps)
+
+
 
         # step 3: scatter refined features to multi-levels by a residual path
         outs = []
@@ -100,5 +194,7 @@ class BFP(BaseModule):
                 residual = F.adaptive_max_pool2d(bsf, output_size=out_size)
             outs.append(residual + inputs[i])
             # outs.append(residual * 1 / (i + 1) + inputs[i])
-
-        return tuple(outs)
+        if gt_bboxes is not None:
+            return tuple(outs), dict(loss_mask=loss_mask)
+        else:
+            return tuple(outs), None
