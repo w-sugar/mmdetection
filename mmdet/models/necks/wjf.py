@@ -48,13 +48,30 @@ class WJF(BaseModule):
         self.refine_level = refine_level
         assert 0 <= self.refine_level < self.num_levels
         
-        self.self_attn1 = nn.MultiheadAttention(256, 8, dropout=0.1)
+        self.self_attn1 = nn.MultiheadAttention(128, 4, dropout=0.1)
         self.dropout1 = nn.Dropout(0.1)
-        self.norm1 = nn.LayerNorm(256)
+        self.norm1 = nn.LayerNorm(128)
 
         # self.self_attn2 = nn.MultiheadAttention(256, 8, dropout=0.1)
         # self.dropout2 = nn.Dropout(0.1)
         # self.norm2 = nn.LayerNorm(256)
+
+        self.reduceChannelConv = ConvModule(
+            self.in_channels,
+            self.in_channels // 2,
+            3,
+            padding=1,
+            conv_cfg=self.conv_cfg,
+            norm_cfg=self.norm_cfg
+        )
+        self.addChannelConv = ConvModule(
+            self.in_channels // 2,
+            self.in_channels,
+            3,
+            padding=1,
+            conv_cfg=self.conv_cfg,
+            norm_cfg=self.norm_cfg
+        )
 
     def forward(self, inputs):
         """Forward function."""
@@ -72,6 +89,7 @@ class WJF(BaseModule):
             else:
                 gathered = F.interpolate(
                     inputs[i], size=gather_size, mode='nearest')
+            gathered = self.reduceChannelConv(gathered)
             gathered = gathered.flatten(2).permute(2, 0, 1)
             feats.append(gathered)
 
@@ -93,8 +111,9 @@ class WJF(BaseModule):
         bsf = self.norm1(pro_features3)
 
         # reshape
-        bsf = bsf.permute(1, 2, 0).view(b, c, h, w)
+        bsf = bsf.permute(1, 2, 0).view(b, c // 2, h, w)
 
+        bsf = self.addChannelConv(bsf)
         # step 3: scatter refined features to multi-levels by a residual path
         outs = []
         for i in range(self.num_levels):
