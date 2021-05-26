@@ -118,7 +118,7 @@ class TwoStageDetector(BaseDetector):
         Returns:
             dict[str, Tensor]: a dictionary of loss components
         """
-        x, loss_mask = self.extract_feat(img, gt_bboxes)
+        x, loss_mask = self.extract_feat(img, None)
 
         losses = dict()
         if loss_mask is not None:

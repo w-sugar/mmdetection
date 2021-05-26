@@ -131,14 +131,14 @@ class BFP(BaseModule):
                 use_scale=False,
                 conv_cfg=self.conv_cfg,
                 norm_cfg=self.norm_cfg)
-        self.maskconv = ConvModule(
-            self.in_channels,
-            1,
-            3,
-            padding=1,
-            conv_cfg=self.conv_cfg,
-            norm_cfg=self.norm_cfg
-        )
+        # self.maskconv = ConvModule(
+        #     self.in_channels,
+        #     1,
+        #     3,
+        #     padding=1,
+        #     conv_cfg=self.conv_cfg,
+        #     norm_cfg=self.norm_cfg
+        # )
         self.loss_mask = SmoothL1Loss(beta=1.0 / 9.0, loss_weight=1.0)
 
     def forward(self, inputs):
