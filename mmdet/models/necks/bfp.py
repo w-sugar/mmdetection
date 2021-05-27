@@ -99,6 +99,7 @@ class BFP(BaseModule):
                  in_channels,
                  num_levels,
                  refine_level=2,
+                 with_mask_loss=False,
                  refine_type=None,
                  conv_cfg=None,
                  norm_cfg=None,
@@ -107,6 +108,7 @@ class BFP(BaseModule):
         super(BFP, self).__init__(init_cfg)
         assert refine_type in [None, 'conv', 'non_local']
 
+        self.with_mask_loss = with_mask_loss
         self.in_channels = in_channels
         self.num_levels = num_levels
         self.conv_cfg = conv_cfg
@@ -165,7 +167,7 @@ class BFP(BaseModule):
         # step 2: refine gathered features
         if self.refine_type is not None:
             bsf = self.refine(bsf)
-        if gt_bboxes is not None:
+        if self.with_mask_loss:
             heatmaps = []
             for gt_bbox in gt_bboxes:
                 heatmap = torch.zeros([bsf.shape[2], bsf.shape[3]], device=gt_bboxes[0].device)

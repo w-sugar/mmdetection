@@ -47,6 +47,7 @@ class BBoxHead(BaseModule):
         self.reg_class_agnostic = reg_class_agnostic
         self.reg_decoded_bbox = reg_decoded_bbox
         self.fp16_enabled = False
+        self.use_wordtree_cls = loss_cls.get('type')
 
         self.bbox_coder = build_bbox_coder(bbox_coder)
         self.loss_cls = build_loss(loss_cls)
@@ -321,9 +322,12 @@ class BBoxHead(BaseModule):
         """
         if isinstance(cls_score, list):
             cls_score = sum(cls_score) / float(len(cls_score))
-
-        scores = F.softmax(
-            cls_score, dim=-1) if cls_score is not None else None
+        if self.use_wordtree_cls != 'WordTreeFocalLoss':
+            scores = F.softmax(
+                cls_score, dim=-1) if cls_score is not None else None
+        else:
+            scores = F.sigmoid(
+                cls_score.index_select(-1, torch.tensor([0,1,2,3,4,5,6,7,8,9,10,16], device=cls_score.device))) if cls_score is not None else None
 
         batch_mode = True
         if rois.ndim == 2:

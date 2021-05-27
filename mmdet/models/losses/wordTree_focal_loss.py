@@ -125,7 +125,7 @@ class WordTreeFocalLoss(nn.Module):
                 "sum".
             loss_weight (float, optional): Weight of loss. Defaults to 1.0.
         """
-        super(FocalLoss, self).__init__()
+        super(WordTreeFocalLoss, self).__init__()
         assert use_sigmoid is True, 'Only sigmoid focal loss supported now.'
         self.use_sigmoid = use_sigmoid
         self.gamma = gamma
@@ -158,8 +158,7 @@ class WordTreeFocalLoss(nn.Module):
         assert reduction_override in (None, 'none', 'mean', 'sum')
         reduction = (
             reduction_override if reduction_override else self.reduction)
-        
-        multilabel = torch.tensor([11, 11, 12, 13, 13, 14, 15, 15, 14, 12, 10, 16])
+        multilabel = torch.tensor([11, 11, 12, 13, 13, 14, 15, 15, 14, 12, 10, 0, 0, 0, 0, 0, 16], device=target.device)
         target = torch.cat((target.unsqueeze(1), multilabel[target].unsqueeze(1)), 1)
         if self.use_sigmoid:
             # if torch.cuda.is_available() and pred.is_cuda:
