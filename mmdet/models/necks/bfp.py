@@ -6,6 +6,7 @@ from mmcv.runner import BaseModule
 from ..builder import NECKS
 import torch
 from ..losses import SmoothL1Loss
+import matplotlib.pyplot as plt
 
 def gaussian2D(radius_x, radius_y, sigma_x=1, sigma_y=1, dtype=torch.float32, device='cpu'):
     """Generate 2D gaussian kernel.
@@ -133,20 +134,54 @@ class BFP(BaseModule):
                 use_scale=False,
                 conv_cfg=self.conv_cfg,
                 norm_cfg=self.norm_cfg)
-        # self.maskconv = ConvModule(
-        #     self.in_channels,
-        #     1,
-        #     3,
-        #     padding=1,
-        #     conv_cfg=self.conv_cfg,
-        #     norm_cfg=self.norm_cfg
-        # )
+        if self.with_mask_loss:
+            self.maskconv1 = ConvModule(
+                self.in_channels,
+                self.in_channels // 2,
+                3,
+                padding=1,
+                conv_cfg=self.conv_cfg,
+                norm_cfg=self.norm_cfg
+            )
+            self.maskconv2 = ConvModule(
+                self.in_channels // 2,
+                1,
+                3,
+                padding=1,
+                conv_cfg=self.conv_cfg,
+                norm_cfg=self.norm_cfg
+            )
         self.loss_mask = SmoothL1Loss(beta=1.0 / 9.0, loss_weight=1.0)
 
     def forward(self, inputs):
         inputs, gt_bboxes = inputs
         """Forward function."""
         assert len(inputs) == self.num_levels
+
+        # 对fpn最底层进行mask监督
+        if self.with_mask_loss and gt_bboxes is not None:
+            mask_size = inputs[0].size()[2:]
+            heatmaps = []
+            for gt_bbox in gt_bboxes:
+                heatmap = torch.zeros([mask_size[0] * 4, mask_size[1] * 4], device=gt_bboxes[0].device)
+                # center = (gt_bbox / 16)
+                center = gt_bbox
+                Ws = center[:, 2] - center[:, 0]
+                Hs = center[:, 3] - center[:, 1]
+                center = center[:, :2] + (center[:, 2:] - center[:, :2]) / 2
+                center = torch.clamp(center, 0)
+                for cen, w, h in zip(center, Ws, Hs):
+                    heatmap = gen_gaussian_target(heatmap, cen, w/2, h/2)
+                heatmaps.append(heatmap)
+                # plt.imshow(heatmap.cpu().numpy())
+                # plt.savefig(str(x)+'.jpg')
+            heatmaps = torch.stack(heatmaps)
+            # plt.imshow(self.maskconv(bsf).squeeze(1)[0].cpu().detach().numpy())
+            # plt.savefig('3.jpg')
+            mask1 = self.maskconv1(inputs[0])
+            mask2 = self.maskconv2(mask1)
+            mask = F.interpolate(mask2, size=[mask_size[0] * 4, mask_size[1] * 4], mode='nearest')
+            loss_mask = self.loss_mask(mask.squeeze(1), heatmaps)
 
         # step 1: gather multi-level features by resize and average
         feats = []
@@ -167,24 +202,6 @@ class BFP(BaseModule):
         # step 2: refine gathered features
         if self.refine_type is not None:
             bsf = self.refine(bsf)
-        if self.with_mask_loss:
-            heatmaps = []
-            for gt_bbox in gt_bboxes:
-                heatmap = torch.zeros([bsf.shape[2], bsf.shape[3]], device=gt_bboxes[0].device)
-                center = (gt_bbox / 16)
-                Ws = center[:, 2] - center[:, 0]
-                Hs = center[:, 3] - center[:, 1]
-                center = center[:, :2] + (center[:, 2:] - center[:, :2]) / 2
-                center = torch.clamp(center, 0)
-                for cen, w, h in zip(center, Ws, Hs):
-
-                    heatmap = gen_gaussian_target(heatmap, cen, w/2, h/2)
-                heatmaps.append(heatmap)
-            heatmaps = torch.stack(heatmaps)
-            bsf_mask = self.maskconv(bsf).squeeze(1)
-            loss_mask = self.loss_mask(bsf_mask, heatmaps)
-
-
 
         # step 3: scatter refined features to multi-levels by a residual path
         outs = []
@@ -196,7 +213,7 @@ class BFP(BaseModule):
                 residual = F.adaptive_max_pool2d(bsf, output_size=out_size)
             outs.append(residual + inputs[i])
             # outs.append(residual * 1 / (i + 1) + inputs[i])
-        if gt_bboxes is not None:
+        if self.with_mask_loss and gt_bboxes is not None:
             return tuple(outs), dict(loss_mask=loss_mask)
         else:
             return tuple(outs), None
