@@ -26,7 +26,8 @@ def gaussian2D(radius_x, radius_y, sigma_x=1, sigma_y=1, dtype=torch.float32, de
     y = torch.arange(
         -radius_y, radius_y + 1, dtype=dtype, device=device).view(-1, 1)
 
-    h = (-(x * x + y * y) / (2 * sigma_x * sigma_y)).exp()
+    # h = (-(x * x + y * y) / (2 * sigma_x * sigma_y)).exp()
+    h = (-((x * x / (2 * sigma_x * sigma_x)) + (y * y / (2 * sigma_y * sigma_y)))).exp()
 
     h[h < torch.finfo(h.dtype).eps * h.max()] = 0
     return h
@@ -162,6 +163,7 @@ class BFP(BaseModule):
         if self.with_mask_loss and gt_bboxes is not None:
             mask_size = inputs[0].size()[2:]
             heatmaps = []
+            # x = 0
             for gt_bbox in gt_bboxes:
                 heatmap = torch.zeros([mask_size[0] * 4, mask_size[1] * 4], device=gt_bboxes[0].device)
                 # center = (gt_bbox / 16)
@@ -176,10 +178,10 @@ class BFP(BaseModule):
                 # plt.imshow(heatmap.cpu().numpy())
                 # plt.savefig(str(x)+'.jpg')
             heatmaps = torch.stack(heatmaps)
-            # plt.imshow(self.maskconv(bsf).squeeze(1)[0].cpu().detach().numpy())
-            # plt.savefig('3.jpg')
             mask1 = self.maskconv1(inputs[0])
             mask2 = self.maskconv2(mask1)
+            # plt.imshow(mask2.squeeze(1)[0].cpu().detach().numpy())
+            # plt.savefig('3.jpg')
             mask = F.interpolate(mask2, size=[mask_size[0] * 4, mask_size[1] * 4], mode='nearest')
             loss_mask = self.loss_mask(mask.squeeze(1), heatmaps)
 
