@@ -57,7 +57,14 @@ class BaseDetector(BaseModule, metaclass=ABCMeta):
             list[torch.Tensor]: Features of different images
         """
         assert isinstance(imgs, list)
-        return [self.extract_feat(img, gt_bboxes)[0] for img in imgs]
+        x = []
+        mask_x = []
+        for img in imgs:
+            tmp_x, tmp_mask, _ = self.extract_feat(img, gt_bboxes)
+            x.append(tmp_x)
+            mask_x.append(tmp_mask)
+        # return [self.extract_feat(img, gt_bboxes)[:2] for img in imgs]
+        return x, mask_x
 
     def forward_train(self, imgs, img_metas, **kwargs):
         """

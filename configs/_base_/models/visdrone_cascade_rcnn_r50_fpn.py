@@ -17,6 +17,12 @@ model = dict(
         out_channels=256,
         num_outs=5),
         # dict(
+        #     type='WJF_P',
+        #     in_channels=256,
+        #     num_levels=5,
+        #     refine_level=2,
+        #     refine_type='non_local')],
+        # dict(
         #     type='WJF',
         #     in_channels=256,
         #     num_levels=5,
@@ -52,12 +58,12 @@ model = dict(
         bbox_roi_extractor=dict(
             type='SingleRoIExtractor',
             roi_layer=dict(type='RoIAlign', output_size=7, sampling_ratio=0),
-            out_channels=256,
+            out_channels=256+64,
             featmap_strides=[4, 8, 16, 32]),
         bbox_head=[
             dict(
                 type='Shared2FCBBoxHead',
-                in_channels=256,
+                in_channels=256+64,
                 fc_out_channels=1024,
                 roi_feat_size=7,
                 num_classes=11,#16
@@ -81,7 +87,7 @@ model = dict(
                                loss_weight=1.0)),
             dict(
                 type='Shared2FCBBoxHead',
-                in_channels=256,
+                in_channels=256+64,
                 fc_out_channels=1024,
                 roi_feat_size=7,
                 num_classes=11,
@@ -105,7 +111,7 @@ model = dict(
                                loss_weight=1.0)),
             dict(
                 type='Shared2FCBBoxHead',
-                in_channels=256,
+                in_channels=256+64,
                 fc_out_channels=1024,
                 roi_feat_size=7,
                 num_classes=11,

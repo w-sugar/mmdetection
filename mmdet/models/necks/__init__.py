@@ -11,8 +11,9 @@ from .pafpn import PAFPN
 from .rfp import RFP
 from .yolo_neck import YOLOV3Neck
 from .wjf import WJF
+from .wjf_pconv import WJF_P
 
 __all__ = [
     'FPN', 'BFP', 'ChannelMapper', 'HRFPN', 'NASFPN', 'FPN_CARAFE', 'PAFPN',
-    'NASFCOS_FPN', 'RFP', 'YOLOV3Neck', 'FPG', 'DilatedEncoder', 'WJF'
+    'NASFCOS_FPN', 'RFP', 'YOLOV3Neck', 'FPG', 'DilatedEncoder', 'WJF', 'WJF_P'
 ]

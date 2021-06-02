@@ -8,9 +8,10 @@ from torch import nn
 from .test import _NonLocalNd
 from mmcv.runner import auto_fp16
 from mmcv.cnn import normal_init
+import torch
 
 @NECKS.register_module()
-class WJF(BaseModule):
+class WJF_P(BaseModule):
     """BFP (Balanced Feature Pyrmamids)
 
     BFP takes multi-level features as inputs and gather them into a single one,
@@ -41,7 +42,7 @@ class WJF(BaseModule):
                  norm_cfg=None,
                  init_cfg=dict(
                      type='Xavier', layer='Conv2d', distribution='uniform')):
-        super(WJF, self).__init__(init_cfg)
+        super(WJF_P, self).__init__(init_cfg)
         assert refine_type in [None, 'conv', 'non_local']
 
         self.in_channels = in_channels
@@ -239,17 +240,47 @@ class PConvMoule(nn.Module):
             )
         )
 
+        # 增加通道注意力
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.action_p2_squeeze = nn.Conv2d(in_channels, in_channels // 16, kernel_size=(1,1), stride=(1,1), bias=False, padding=(0,0))
+        self.action_p2_conv1 = nn.Conv1d(in_channels // 16, in_channels // 16, kernel_size=3, stride=1, bias=False, padding=1, groups=1)
+        self.action_p2_expand = nn.Conv2d(in_channels // 16, out_channels, kernel_size=(1,1), stride=(1,1), bias=False, padding=(0,0))
+        self.relu = nn.ReLU(inplace=True)
+        self.sigmoid = nn.Sigmoid()
     def forward(self, x):
         assert len(x) == 3
         out_size = x[1].size()[2:]
         # level-1
         temp_fea = self.Pconv[0](x[0])
-        temp_fea = F.interpolate(temp_fea, size=out_size, mode='nearest')
+        # temp_fea = F.interpolate(temp_fea, size=out_size, mode='nearest')
+        
+        # # level-2
+        # temp_fea += self.Pconv[1](x[1])
+
+        # # level-3
+        # temp_fea += self.Pconv[2](x[2])
+
+        temp_fea_1 = F.interpolate(temp_fea, size=out_size, mode='nearest')
         
         # level-2
-        temp_fea += self.Pconv[1](x[1])
+        temp_fea_2 = self.Pconv[1](x[1])
 
         # level-3
-        temp_fea += self.Pconv[2](x[2])
-
-        return temp_fea
+        temp_fea_3 = self.Pconv[2](x[2])
+        bs = x[1].size()[0]
+        temp_fea = torch.cat([temp_fea_1, temp_fea_2, temp_fea_3], 0)
+        x_p2 = self.avg_pool(temp_fea)
+        x_p2 = self.action_p2_squeeze(x_p2)
+        nt, c, h, w = x_p2.size()
+        x_p2 = x_p2.view(bs, 3, c, 1, 1).squeeze(-1).squeeze(-1).transpose(2,1).contiguous()
+        x_p2 = self.action_p2_conv1(x_p2)
+        x_p2 = self.relu(x_p2)
+        x_p2 = x_p2.transpose(2,1).contiguous().view(-1, c, 1, 1)
+        x_p2 = self.action_p2_expand(x_p2)
+        x_p2 = self.sigmoid(x_p2)
+        # x_p2 = x_shift * x_p2 + x_shift
+        x_p2 = temp_fea * x_p2
+        x_p2 = x_p2.view(bs, 3, 256, out_size[0], out_size[1]).contiguous()
+        x_p2 = torch.sum(x_p2, 1)
+        # return temp_fea
+        return x_p2

@@ -60,8 +60,8 @@ class TwoStageDetector(BaseDetector):
         """Directly extract features from the backbone+neck."""
         x = self.backbone(img)
         if self.with_neck:
-            x, loss_mask = self.neck((x, gt_bboxes))
-        return x, loss_mask
+            x, mask_x, loss_mask = self.neck((x, gt_bboxes))
+        return x, mask_x, loss_mask
 
     def forward_dummy(self, img):
         """Used for computing network flops.
@@ -118,7 +118,7 @@ class TwoStageDetector(BaseDetector):
         Returns:
             dict[str, Tensor]: a dictionary of loss components
         """
-        x, loss_mask = self.extract_feat(img, gt_bboxes)
+        x, mask_x, loss_mask = self.extract_feat(img, gt_bboxes)
 
         losses = dict()
         if loss_mask is not None:
@@ -138,7 +138,10 @@ class TwoStageDetector(BaseDetector):
             losses.update(rpn_losses)
         else:
             proposal_list = proposals
-
+        new_x = []
+        for x_, mask_x_ in zip(x, mask_x):
+            new_x.append(torch.cat([x_, mask_x_], dim=1))
+        x = tuple(new_x)
         roi_losses = self.roi_head.forward_train(x, img_metas, proposal_list,
                                                  gt_bboxes, gt_labels,
                                                  gt_bboxes_ignore, gt_masks,
@@ -169,7 +172,7 @@ class TwoStageDetector(BaseDetector):
         """Test without augmentation."""
         assert self.with_bbox, 'Bbox head must be implemented.'
 
-        x, _ = self.extract_feat(img, None)
+        x, mask_x, _ = self.extract_feat(img, None)
 
         # get origin input shape to onnx dynamic input shape
         if torch.onnx.is_in_onnx_export():
@@ -181,6 +184,10 @@ class TwoStageDetector(BaseDetector):
         else:
             proposal_list = proposals
 
+        new_x = []
+        for x_, mask_x_ in zip(x, mask_x):
+            new_x.append(torch.cat([x_, mask_x_], dim=1))
+        x = tuple(new_x)
         return self.roi_head.simple_test(
             x, proposal_list, img_metas, rescale=rescale)
 
@@ -190,7 +197,15 @@ class TwoStageDetector(BaseDetector):
         If rescale is False, then returned bboxes and masks will fit the scale
         of imgs[0].
         """
-        x = self.extract_feats(imgs, None)
+        x, mask_x = self.extract_feats(imgs, None)
         proposal_list = self.rpn_head.aug_test_rpn(x, img_metas)
+        new_x = []
+        for x_per, mask_x_per in zip(x, mask_x):
+            new_x_per = []
+            for x_, mask_x_ in zip(x_per, mask_x_per):
+                new_x_per.append(torch.cat([x_, mask_x_], dim=1))
+            x_per = tuple(new_x_per)
+            new_x.append(x_per)
+        x = new_x
         return self.roi_head.aug_test(
             x, proposal_list, img_metas, rescale=rescale)
