@@ -21,7 +21,7 @@ model = dict(
         #     in_channels=256,
         #     num_levels=5,
         #     refine_level=2,
-        #     refine_type='non_local')],
+        #     refine_type='non_local' )],
         # dict(
         #     type='WJF',
         #     in_channels=256,
