@@ -138,10 +138,11 @@ class TwoStageDetector(BaseDetector):
             losses.update(rpn_losses)
         else:
             proposal_list = proposals
-        new_x = []
-        for x_, mask_x_ in zip(x, mask_x):
-            new_x.append(torch.cat([x_, mask_x_], dim=1))
-        x = tuple(new_x)
+        if mask_x is not None:
+            new_x = []
+            for x_, mask_x_ in zip(x, mask_x):
+                new_x.append(torch.cat([x_, mask_x_], dim=1))
+            x = tuple(new_x)
         roi_losses = self.roi_head.forward_train(x, img_metas, proposal_list,
                                                  gt_bboxes, gt_labels,
                                                  gt_bboxes_ignore, gt_masks,
@@ -183,11 +184,11 @@ class TwoStageDetector(BaseDetector):
             proposal_list = self.rpn_head.simple_test_rpn(x, img_metas)
         else:
             proposal_list = proposals
-
-        new_x = []
-        for x_, mask_x_ in zip(x, mask_x):
-            new_x.append(torch.cat([x_, mask_x_], dim=1))
-        x = tuple(new_x)
+        if mask_x is not None:
+            new_x = []
+            for x_, mask_x_ in zip(x, mask_x):
+                new_x.append(torch.cat([x_, mask_x_], dim=1))
+            x = tuple(new_x)
         return self.roi_head.simple_test(
             x, proposal_list, img_metas, rescale=rescale)
 
@@ -199,13 +200,14 @@ class TwoStageDetector(BaseDetector):
         """
         x, mask_x = self.extract_feats(imgs, None)
         proposal_list = self.rpn_head.aug_test_rpn(x, img_metas)
-        new_x = []
-        for x_per, mask_x_per in zip(x, mask_x):
-            new_x_per = []
-            for x_, mask_x_ in zip(x_per, mask_x_per):
-                new_x_per.append(torch.cat([x_, mask_x_], dim=1))
-            x_per = tuple(new_x_per)
-            new_x.append(x_per)
-        x = new_x
+        if mask_x[0] is not None:
+            new_x = []
+            for x_per, mask_x_per in zip(x, mask_x):
+                new_x_per = []
+                for x_, mask_x_ in zip(x_per, mask_x_per):
+                    new_x_per.append(torch.cat([x_, mask_x_], dim=1))
+                x_per = tuple(new_x_per)
+                new_x.append(x_per)
+            x = new_x
         return self.roi_head.aug_test(
             x, proposal_list, img_metas, rescale=rescale)

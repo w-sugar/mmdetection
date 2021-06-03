@@ -195,7 +195,7 @@ class WJF_P(BaseModule):
             # outs.append(residual * 1 / (i + 1) + inputs[i])
 
         # return tuple(outs)
-        return tuple(outs), None
+        return tuple(outs), None, None
 
 
 class PConvMoule(nn.Module):
@@ -208,65 +208,78 @@ class PConvMoule(nn.Module):
     ):
         super(PConvMoule, self).__init__()
 
-        self.Pconv = nn.ModuleList()
-        self.Pconv.append(
-            ConvModule(
-                in_channels,
-                out_channels,
-                kernel_size[0],
-                stride=1,
-                padding=1,
-                norm_cfg=dict(type='BN', requires_grad=True)
-            )
-        )
-        self.Pconv.append(
-            ConvModule(
-                in_channels,
-                out_channels,
-                kernel_size[1],
-                stride=1,
-                padding=1,
-                norm_cfg=dict(type='BN', requires_grad=True)
-            )
-        )
-        self.Pconv.append(
-            ConvModule(
-                in_channels,
-                out_channels,
-                kernel_size[1],
-                stride=2,
-                padding=1,
-                norm_cfg=dict(type='BN', requires_grad=True)
-            )
-        )
+        # self.Pconv = nn.ModuleList()
+        # self.Pconv.append(
+        #     ConvModule(
+        #         in_channels,
+        #         out_channels,
+        #         kernel_size[0],
+        #         stride=1,
+        #         padding=1,
+        #         norm_cfg=dict(type='BN', requires_grad=True)
+        #     )
+        # )
+        # self.Pconv.append(
+        #     ConvModule(
+        #         in_channels,
+        #         out_channels,
+        #         kernel_size[1],
+        #         stride=1,
+        #         padding=1,
+        #         norm_cfg=dict(type='BN', requires_grad=True)
+        #     )
+        # )
+        # self.Pconv.append(
+        #     ConvModule(
+        #         in_channels,
+        #         out_channels,
+        #         kernel_size[1],
+        #         stride=2,
+        #         padding=1,
+        #         norm_cfg=dict(type='BN', requires_grad=True)
+        #     )
+        # )
 
         # 增加通道注意力
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.action_p2_squeeze = nn.Conv2d(in_channels, in_channels // 16, kernel_size=(1,1), stride=(1,1), bias=False, padding=(0,0))
-        self.action_p2_conv1 = nn.Conv1d(in_channels // 16, in_channels // 16, kernel_size=3, stride=1, bias=False, padding=1, groups=1)
-        self.action_p2_expand = nn.Conv2d(in_channels // 16, out_channels, kernel_size=(1,1), stride=(1,1), bias=False, padding=(0,0))
-        self.relu = nn.ReLU(inplace=True)
-        self.sigmoid = nn.Sigmoid()
+        # self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        # self.action_p2_squeeze = nn.Conv2d(in_channels, in_channels // 16, kernel_size=(1,1), stride=(1,1), bias=False, padding=(0,0))
+        # self.action_p2_conv1 = nn.Conv1d(in_channels // 16, in_channels // 16, kernel_size=3, stride=1, bias=False, padding=1, groups=1)
+        # self.action_p2_expand = nn.Conv2d(in_channels // 16, out_channels, kernel_size=(1,1), stride=(1,1), bias=False, padding=(0,0))
+        # self.relu = nn.ReLU(inplace=True)
+        # self.sigmoid = nn.Sigmoid()
+        self.Tconv = ConvModule(
+            in_channels, 
+            out_channels,
+            (3, 3, 3),
+            stride=(1, 1, 1),
+            padding=(0, 1, 1),
+            conv_cfg=dict(type='Conv3d'),
+            norm_cfg=dict(type='BN3d', requires_grad=True)
+        )
     def forward(self, x):
         assert len(x) == 3
         out_size = x[1].size()[2:]
-        # level-1
-        temp_fea = self.Pconv[0](x[0])
-        # temp_fea = F.interpolate(temp_fea, size=out_size, mode='nearest')
+        # # level-1
+        # temp_fea = self.Pconv[0](x[0])
+        # # temp_fea = F.interpolate(temp_fea, size=out_size, mode='nearest')
+        
+        # # # level-2
+        # # temp_fea += self.Pconv[1](x[1])
+
+        # # # level-3
+        # # temp_fea += self.Pconv[2](x[2])
+
+        # temp_fea_1 = F.interpolate(temp_fea, size=out_size, mode='nearest')
         
         # # level-2
-        # temp_fea += self.Pconv[1](x[1])
+        # temp_fea_2 = self.Pconv[1](x[1])
 
         # # level-3
-        # temp_fea += self.Pconv[2](x[2])
+        # temp_fea_3 = self.Pconv[2](x[2])
+        x[0] = F.interpolate(x[0], size=out_size, mode='nearest')
+        x[2] = F.adaptive_max_pool2d(x[2], output_size=out_size)
 
-        temp_fea_1 = F.interpolate(temp_fea, size=out_size, mode='nearest')
-        
-        # level-2
-        temp_fea_2 = self.Pconv[1](x[1])
-
-        # level-3
-        temp_fea_3 = self.Pconv[2](x[2])
+        '''
         bs = x[1].size()[0]
         temp_fea = torch.cat([temp_fea_1, temp_fea_2, temp_fea_3], 0)
         x_p2 = self.avg_pool(temp_fea)
@@ -282,5 +295,10 @@ class PConvMoule(nn.Module):
         x_p2 = temp_fea * x_p2
         x_p2 = x_p2.view(bs, 3, 256, out_size[0], out_size[1]).contiguous()
         x_p2 = torch.sum(x_p2, 1)
-        # return temp_fea
-        return x_p2
+        '''
+
+        # temp_fea = torch.stack([temp_fea_1, temp_fea_2, temp_fea_3], 2)
+        temp_fea = torch.stack(x, 2)
+        temp_fea = self.Tconv(temp_fea).squeeze(2)
+        return temp_fea
+        # return x_p2

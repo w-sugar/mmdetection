@@ -63,7 +63,7 @@ model = dict(
         bbox_head=[
             dict(
                 type='Shared2FCBBoxHead',
-                in_channels=256+64,
+                in_channels=256,
                 fc_out_channels=1024,
                 roi_feat_size=7,
                 num_classes=11,#16
@@ -87,7 +87,7 @@ model = dict(
                                loss_weight=1.0)),
             dict(
                 type='Shared2FCBBoxHead',
-                in_channels=256+64,
+                in_channels=256,
                 fc_out_channels=1024,
                 roi_feat_size=7,
                 num_classes=11,
@@ -111,7 +111,7 @@ model = dict(
                                loss_weight=1.0)),
             dict(
                 type='Shared2FCBBoxHead',
-                in_channels=256+64,
+                in_channels=256,
                 fc_out_channels=1024,
                 roi_feat_size=7,
                 num_classes=11,
