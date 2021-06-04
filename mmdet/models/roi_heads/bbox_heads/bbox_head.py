@@ -326,8 +326,42 @@ class BBoxHead(BaseModule):
             scores = F.softmax(
                 cls_score, dim=-1) if cls_score is not None else None
         else:
-            scores = F.sigmoid(
-                cls_score.index_select(-1, torch.tensor([0,1,2,3,4,5,6,7,8,9,10,16], device=cls_score.device))) if cls_score is not None else None
+            #sigmoid
+            # scores = F.softmax(
+            #     cls_score.index_select(-1, torch.tensor([0,1,2,3,4,5,6,7,8,9,10,16], device=cls_score.device)), dim=-1) if cls_score is not None else None
+            
+            # mean
+            # scores = F.sigmoid(
+            #     cls_score) if cls_score is not None else None
+            # scores_0_10 = scores.index_select(-1, torch.tensor([0,1,2,3,4,5,6,7,8,9,10,16], device=cls_score.device))
+            # score_11_16 = scores[:, 11:16].repeat(1, 2)
+            # score_11_16 = torch.gather(score_11_16, -1, torch.tensor([0,5,1,2,7,3,4,9,8,6], device=cls_score.device).repeat(score_11_16.shape[0], 1))
+            # scores_0_10[:, :10] = (scores_0_10[:, :10] + score_11_16) / 2
+            # scores = scores_0_10
+
+            # wordtree
+            scores = F.sigmoid(cls_score) if cls_score is not None else None
+            scores_others_bg = torch.gather(scores, -1, torch.tensor([10, 16], device=cls_score.device).repeat(scores.shape[0], 1))
+            scores_11_16 = torch.cat([scores[:, 11:16], scores_others_bg], 1)
+            scores_11_16_root_indices = torch.argmax(scores_11_16, -1)
+
+            scores_11_16_root_indices = torch.cat([scores_11_16_root_indices.unsqueeze(1), scores_11_16_root_indices.unsqueeze(1) + 7], 1)
+
+            row_indices = torch.arange(scores_11_16.shape[0]).unsqueeze(1)
+            scores_0_10_sigmoid = scores.index_select(-1, torch.tensor([0,1,2,3,4,10,16,5,6,7,8,9,10,16], device=cls_score.device))
+            scores_0_10 = cls_score.index_select(-1, torch.tensor([0,1,2,3,4,10,16,5,6,7,8,9,10,16], device=cls_score.device))
+            scores_0_10 = torch.gather(scores_0_10, -1, torch.tensor([0,2,3,7,8,5,6,1,11,4,10,9,12,13], device=cls_score.device).repeat(scores_0_10.shape[0], 1))
+            scores_0_10_sigmoid = torch.gather(scores_0_10_sigmoid, -1, torch.tensor([0,2,3,7,8,5,6,1,11,4,10,9,12,13], device=cls_score.device).repeat(scores_0_10.shape[0], 1))
+
+            scores_child = scores_0_10[row_indices, scores_11_16_root_indices]
+            scores_child = F.softmax(scores_child, dim=-1)
+
+            scores_0_10_sigmoid[row_indices, scores_11_16_root_indices] = scores_child
+            scores_0_10_sigmoid = torch.gather(scores_0_10_sigmoid, -1, torch.tensor([0,7,1,2,9,3,4,11,10,8], device=cls_score.device).repeat(scores_0_10_sigmoid.shape[0], 1))
+            scores = torch.cat([scores_0_10_sigmoid, scores_others_bg], 1)
+
+
+
 
         batch_mode = True
         if rois.ndim == 2:

@@ -48,30 +48,38 @@ class WJF(BaseModule):
         self.refine_level = refine_level
         assert 0 <= self.refine_level < self.num_levels
         
-        self.self_attn1 = nn.MultiheadAttention(128, 4, dropout=0.1)
+        self.self_attn1 = nn.MultiheadAttention(256, 2, dropout=0.1)
         self.dropout1 = nn.Dropout(0.1)
-        self.norm1 = nn.LayerNorm(128)
+        self.norm1 = nn.LayerNorm(256)
+
+        self.self_attn2 = nn.MultiheadAttention(256, 2, dropout=0.1)
+        self.dropout2 = nn.Dropout(0.1)
+        self.norm2 = nn.LayerNorm(256)
+
+        self.self_attn3 = nn.MultiheadAttention(256, 2, dropout=0.1)
+        self.dropout3 = nn.Dropout(0.1)
+        self.norm3 = nn.LayerNorm(256)
 
         # self.self_attn2 = nn.MultiheadAttention(256, 8, dropout=0.1)
         # self.dropout2 = nn.Dropout(0.1)
         # self.norm2 = nn.LayerNorm(256)
 
-        self.reduceChannelConv = ConvModule(
-            self.in_channels,
-            self.in_channels // 2,
-            3,
-            padding=1,
-            conv_cfg=self.conv_cfg,
-            norm_cfg=self.norm_cfg
-        )
-        self.addChannelConv = ConvModule(
-            self.in_channels // 2,
-            self.in_channels,
-            3,
-            padding=1,
-            conv_cfg=self.conv_cfg,
-            norm_cfg=self.norm_cfg
-        )
+        # self.reduceChannelConv = ConvModule(
+        #     self.in_channels,
+        #     self.in_channels // 2,
+        #     3,
+        #     padding=1,
+        #     conv_cfg=self.conv_cfg,
+        #     norm_cfg=self.norm_cfg
+        # )
+        # self.addChannelConv = ConvModule(
+        #     self.in_channels // 2,
+        #     self.in_channels,
+        #     3,
+        #     padding=1,
+        #     conv_cfg=self.conv_cfg,
+        #     norm_cfg=self.norm_cfg
+        # )
 
     def forward(self, inputs):
         """Forward function."""
@@ -89,7 +97,7 @@ class WJF(BaseModule):
             else:
                 gathered = F.interpolate(
                     inputs[i], size=gather_size, mode='nearest')
-            gathered = self.reduceChannelConv(gathered)
+            # gathered = self.reduceChannelConv(gathered)
             gathered = gathered.flatten(2).permute(2, 0, 1)
             feats.append(gathered)
 
@@ -101,19 +109,19 @@ class WJF(BaseModule):
         pro_features = self.norm1(pro_features)
 
         # self_attention c4-c6
-        pro_features2 = self.self_attn1(feats[2], feats[4], value=feats[3])[0]
-        pro_features2 = feats[3] + self.dropout1(pro_features2)
-        pro_features2 = self.norm1(pro_features2)
+        pro_features2 = self.self_attn2(feats[2], feats[4], value=feats[3])[0]
+        pro_features2 = feats[3] + self.dropout2(pro_features2)
+        pro_features2 = self.norm2(pro_features2)
 
         # self_attention c3-c5
-        pro_features3 = self.self_attn1(pro_features, pro_features2, value=feats[2])[0]
-        pro_features3 = feats[2] + self.dropout1(pro_features3)
-        bsf = self.norm1(pro_features3)
+        pro_features3 = self.self_attn3(pro_features, pro_features2, value=feats[2])[0]
+        pro_features3 = feats[2] + self.dropout3(pro_features3)
+        bsf = self.norm3(pro_features3)
 
         # reshape
-        bsf = bsf.permute(1, 2, 0).view(b, c // 2, h, w)
+        bsf = bsf.permute(1, 2, 0).view(b, c, h, w)
 
-        bsf = self.addChannelConv(bsf)
+        # bsf = self.addChannelConv(bsf)
         # step 3: scatter refined features to multi-levels by a residual path
         outs = []
         for i in range(self.num_levels):
@@ -126,4 +134,4 @@ class WJF(BaseModule):
             # outs.append(residual * 1 / (i + 1) + inputs[i])
 
         # return tuple(outs)
-        return tuple(outs), None
+        return tuple(outs), None, None

@@ -5,6 +5,7 @@ from mmcv.runner import BaseModule
 
 from ..builder import NECKS
 import torch
+from torch import nn
 from ..losses import SmoothL1Loss
 import matplotlib.pyplot as plt
 
@@ -161,19 +162,42 @@ class BFP(BaseModule):
                 norm_cfg=dict(type='BN', requires_grad=True)
             )
 
-            self.upsamplev1 = ConvModule(
-                1, 
-                16, 
-                1,
-                padding=0,
-                norm_cfg=dict(type='BN', requires_grad=True)
-            )
-            self.upsamplev2 = ConvModule(
-                16, 
-                64, 
-                1,
-                padding=0,
-                norm_cfg=dict(type='BN', requires_grad=True)
+            # 不用上采样，直接用下采样之前的feature
+            # self.upsamplev1 = ConvModule(
+            #     1, 
+            #     16, 
+            #     1,
+            #     padding=0,
+            #     norm_cfg=dict(type='BN', requires_grad=True)
+            # )
+            # self.upsamplev2 = ConvModule(
+            #     16, 
+            #     64, 
+            #     1,
+            #     padding=0,
+            #     norm_cfg=dict(type='BN', requires_grad=True)
+            # )
+            self.maskROIConv = nn.Sequential(
+                ConvModule(
+                    64, 
+                    16, 
+                    1,
+                    padding=0,
+                    norm_cfg=dict(type='BN', requires_grad=True)),
+                ConvModule(
+                    16, 
+                    16, 
+                    3,
+                    padding=2,
+                    stride=1,
+                    dilation=2,
+                    norm_cfg=dict(type='BN', requires_grad=True)),
+                ConvModule(
+                    16, 
+                    64, 
+                    1,
+                    padding=0,
+                    norm_cfg=dict(type='BN', requires_grad=True))
             )
         # self.loss_mask = SmoothL1Loss(beta=1.0 / 9.0, loss_weight=1.0)
         self.loss_mask = torch.nn.MSELoss()
@@ -240,15 +264,17 @@ class BFP(BaseModule):
                         center = center[:, :2] + (center[:, 2:] - center[:, :2]) / 2
                         center = torch.clamp(center, 0)
                         for cen, w, h in zip(center, Ws, Hs):
-                            heatmap = gen_gaussian_target(heatmap, cen, w/2, h/2)
+                            # heatmap = gen_gaussian_target(heatmap, cen, w/2, h/2)
+                            heatmap = gen_gaussian_target(heatmap, cen, w/4, h/4)
                         heatmaps.append(heatmap)
                         # plt.imshow(heatmap.cpu().numpy())
                         # plt.savefig(str(x)+'.jpg')
                     heatmaps = torch.stack(heatmaps)
                     loss_mask.append(self.loss_mask(mask3.squeeze(1), heatmaps))
-                upsample1 = self.upsamplev1(mask3)
-                upsample2 = self.upsamplev2(upsample1)
-                outs_upsample.append(upsample2)
+                # upsample1 = self.upsamplev1(mask3)
+                # upsample2 = self.upsamplev2(upsample1)
+                maskROI = self.maskROIConv(mask1) + mask1
+                outs_upsample.append(maskROI)
                 # outs[i] = torch.cat([out, upsample2], dim=1)
             loss_mask = sum(loss_mask)
 
