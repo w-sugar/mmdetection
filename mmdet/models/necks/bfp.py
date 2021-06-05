@@ -278,7 +278,10 @@ class BFP(BaseModule):
                 # outs[i] = torch.cat([out, upsample2], dim=1)
             loss_mask = sum(loss_mask)
 
-        if self.with_mask_loss and gt_bboxes is not None:
-            return tuple(outs), tuple(outs_upsample), dict(loss_mask=loss_mask)
+        if self.with_mask_loss:
+            if gt_bboxes is not None:
+                return tuple(outs), tuple(outs_upsample), dict(loss_mask=loss_mask)
+            else:
+                return tuple(outs), tuple(outs_upsample), None
         else:
-            return tuple(outs), tuple(outs_upsample), None
+            return tuple(outs), None, None

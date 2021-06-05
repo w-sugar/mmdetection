@@ -60,13 +60,13 @@ class ConvFCBBoxHead(BBoxHead):
                 True)
         self.shared_out_channels = last_layer_dim
 
-        # 增加mask_shared_fcs
-        self.branch_fcs_mask = nn.ModuleList()
-        for i in range(self.num_shared_fcs):
-            fc_in_channels = (
-                64 * self.roi_feat_area if i == 0 else 256)
-            self.branch_fcs_mask.append(
-                nn.Linear(fc_in_channels, 256))
+        # # 增加mask_shared_fcs
+        # self.branch_fcs_mask = nn.ModuleList()
+        # for i in range(self.num_shared_fcs):
+        #     fc_in_channels = (
+        #         64 * self.roi_feat_area if i == 0 else 256)
+        #     self.branch_fcs_mask.append(
+        #         nn.Linear(fc_in_channels, 256))
 
         # add cls specific branch
         self.cls_convs, self.cls_fcs, self.cls_last_dim = \
@@ -87,11 +87,13 @@ class ConvFCBBoxHead(BBoxHead):
         self.relu = nn.ReLU(inplace=True)
         # reconstruct fc_cls and fc_reg since input channels are changed
         if self.with_cls:
-            self.fc_cls = nn.Linear(self.cls_last_dim+256, self.num_classes + 1)
+            # self.fc_cls = nn.Linear(self.cls_last_dim+256, self.num_classes + 1)
+            self.fc_cls = nn.Linear(self.cls_last_dim, self.num_classes + 1)
         if self.with_reg:
             out_dim_reg = (4 if self.reg_class_agnostic else 4 *
                            self.num_classes)
-            self.fc_reg = nn.Linear(self.reg_last_dim+256, out_dim_reg)
+            # self.fc_reg = nn.Linear(self.reg_last_dim+256, out_dim_reg)
+            self.fc_reg = nn.Linear(self.reg_last_dim, out_dim_reg)
 
         if init_cfg is None:
             self.init_cfg += [
@@ -148,7 +150,7 @@ class ConvFCBBoxHead(BBoxHead):
 
     def forward(self, x):
         # 1024 * 256+64 * 7 * 7
-        x, mask_x = torch.split(x, [256, 64], 1)
+        # x, mask_x = torch.split(x, [256, 64], 1)
         # shared part
         if self.num_shared_convs > 0:
             for conv in self.shared_convs:
@@ -162,15 +164,15 @@ class ConvFCBBoxHead(BBoxHead):
 
             for fc in self.shared_fcs:
                 x = self.relu(fc(x))
-            mask_x = mask_x.flatten(1)
-            for fc in self.branch_fcs_mask:
-                mask_x = self.relu(fc(mask_x))
+            # mask_x = mask_x.flatten(1)
+            # for fc in self.branch_fcs_mask:
+            #     mask_x = self.relu(fc(mask_x))
         # separate branches
-        # x_cls = x
-        # x_reg = x
+        x_cls = x
+        x_reg = x
         # 1024 * 1024/256
-        x_cls = torch.cat([x, mask_x], 1)
-        x_reg = torch.cat([x, mask_x], 1)
+        # x_cls = torch.cat([x, mask_x], 1)
+        # x_reg = torch.cat([x, mask_x], 1)
 
         for conv in self.cls_convs:
             x_cls = conv(x_cls)

@@ -32,7 +32,7 @@ model = dict(
             in_channels=256,
             num_levels=5,
             refine_level=2,
-            with_mask_loss=True,
+            # with_mask_loss=True,
             refine_type='non_local')],
     rpn_head=dict(
         type='RPNHead',
@@ -58,7 +58,7 @@ model = dict(
         bbox_roi_extractor=dict(
             type='SingleRoIExtractor',
             roi_layer=dict(type='RoIAlign', output_size=7, sampling_ratio=0),
-            out_channels=256+64,
+            out_channels=256,#256+64,
             featmap_strides=[4, 8, 16, 32]),
         bbox_head=[
             dict(
