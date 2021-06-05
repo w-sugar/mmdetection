@@ -11,7 +11,7 @@ model = dict(
         norm_cfg=dict(type='BN', requires_grad=True),
         norm_eval=True,
         style='pytorch'),
-    neck=[dict(
+    neck=dict(
         type='FPN',
         in_channels=[256, 512, 1024, 2048],
         out_channels=256,
@@ -27,13 +27,13 @@ model = dict(
         #     in_channels=256,
         #     num_levels=5,
         #     refine_level=2)],
-        dict(
-            type='BFP',
-            in_channels=256,
-            num_levels=5,
-            refine_level=2,
-            # with_mask_loss=True,
-            refine_type='non_local')],
+        # dict(
+        #     type='BFP',
+        #     in_channels=256,
+        #     num_levels=5,
+        #     refine_level=2,
+        #     # with_mask_loss=True,
+        #     refine_type='non_local')],
     rpn_head=dict(
         type='RPNHead',
         in_channels=256,
@@ -56,7 +56,8 @@ model = dict(
         num_stages=3,
         stage_loss_weights=[1, 0.5, 0.25],
         bbox_roi_extractor=dict(
-            type='SingleRoIExtractor',
+            # type='SingleRoIExtractor',
+            type='SoftRoIExtractor',
             roi_layer=dict(type='RoIAlign', output_size=7, sampling_ratio=0),
             out_channels=256,#256+64,
             featmap_strides=[4, 8, 16, 32]),

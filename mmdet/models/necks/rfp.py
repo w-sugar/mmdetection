@@ -114,21 +114,23 @@ class RFP(FPN):
         constant_init(self.rfp_weight, 0)
 
     def forward(self, inputs):
+        inputs, gt_bboxes = inputs
         inputs = list(inputs)
         assert len(inputs) == len(self.in_channels) + 1  # +1 for input image
         img = inputs.pop(0)
         # FPN forward
-        x = super().forward(tuple(inputs))
+        x, _ = super().forward((tuple(inputs), None))
         for rfp_idx in range(self.rfp_steps - 1):
             rfp_feats = [x[0]] + list(
                 self.rfp_aspp(x[i]) for i in range(1, len(x)))
             x_idx = self.rfp_modules[rfp_idx].rfp_forward(img, rfp_feats)
             # FPN forward
-            x_idx = super().forward(x_idx)
+            x_idx, _ = super().forward((x_idx, None))
             x_new = []
             for ft_idx in range(len(x_idx)):
                 add_weight = torch.sigmoid(self.rfp_weight(x_idx[ft_idx]))
                 x_new.append(add_weight * x_idx[ft_idx] +
                              (1 - add_weight) * x[ft_idx])
             x = x_new
-        return x
+        # return x
+        return x, None, None
