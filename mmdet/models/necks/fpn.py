@@ -6,6 +6,7 @@ from mmcv.cnn import ConvModule
 from mmcv.runner import BaseModule, auto_fp16
 
 from ..builder import NECKS
+from .extra_mask import ExtraMask
 
 
 @NECKS.register_module()
@@ -78,6 +79,7 @@ class FPN(BaseModule):
                  norm_cfg=None,
                  act_cfg=None,
                  upsample_cfg=dict(mode='nearest'),
+                 with_ExtraMask=None,
                  init_cfg=dict(
                      type='Xavier', layer='Conv2d', distribution='uniform')):
         super(FPN, self).__init__(init_cfg)
@@ -161,6 +163,12 @@ class FPN(BaseModule):
                     act_cfg=act_cfg,
                     inplace=False)
                 self.fpn_convs.append(extra_fpn_conv)
+        
+        # ExtraMask
+        self.with_ExtraMask = with_ExtraMask
+        if with_ExtraMask is not None:
+            self.ExtraMask = ExtraMask(with_ExtraMask[0], with_ExtraMask[1], with_ExtraMask[2])
+
 
     @auto_fp16()
     def forward(self, inputs):
@@ -215,5 +223,8 @@ class FPN(BaseModule):
                         outs.append(self.fpn_convs[i](F.relu(outs[-1])))
                     else:
                         outs.append(self.fpn_convs[i](outs[-1]))
+        
+        if self.with_ExtraMask is not None:
+            return self.ExtraMask((tuple(outs), gt_bboxes))
         return (tuple(outs), gt_bboxes)
         # return tuple(outs), None, None

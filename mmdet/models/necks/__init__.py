@@ -12,8 +12,9 @@ from .rfp import RFP
 from .yolo_neck import YOLOV3Neck
 from .wjf import WJF
 from .wjf_pconv import WJF_P
+from .extra_mask import ExtraMask
 
 __all__ = [
     'FPN', 'BFP', 'ChannelMapper', 'HRFPN', 'NASFPN', 'FPN_CARAFE', 'PAFPN',
-    'NASFCOS_FPN', 'RFP', 'YOLOV3Neck', 'FPG', 'DilatedEncoder', 'WJF', 'WJF_P'
+    'NASFCOS_FPN', 'RFP', 'YOLOV3Neck', 'FPG', 'DilatedEncoder', 'WJF', 'WJF_P', 'ExtraMask'
 ]

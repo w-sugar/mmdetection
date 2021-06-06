@@ -102,7 +102,6 @@ class BFP(BaseModule):
                  in_channels,
                  num_levels,
                  refine_level=2,
-                 with_mask_loss=False,
                  refine_type=None,
                  conv_cfg=None,
                  norm_cfg=None,
@@ -111,7 +110,6 @@ class BFP(BaseModule):
         super(BFP, self).__init__(init_cfg)
         assert refine_type in [None, 'conv', 'non_local']
 
-        self.with_mask_loss = with_mask_loss
         self.in_channels = in_channels
         self.num_levels = num_levels
         self.conv_cfg = conv_cfg
@@ -136,71 +134,6 @@ class BFP(BaseModule):
                 use_scale=False,
                 conv_cfg=self.conv_cfg,
                 norm_cfg=self.norm_cfg)
-        if self.with_mask_loss:
-            self.maskconv1 = ConvModule(
-                self.in_channels,
-                self.in_channels // 4,
-                3,
-                padding=1,
-                conv_cfg=self.conv_cfg,
-                norm_cfg=dict(type='BN', requires_grad=True)
-            )
-            self.maskconv2 = ConvModule(
-                self.in_channels // 4,
-                self.in_channels // 16,
-                3,
-                padding=1,
-                conv_cfg=self.conv_cfg,
-                norm_cfg=dict(type='BN', requires_grad=True)
-            )
-            self.maskconv3 = ConvModule(
-                self.in_channels // 16,
-                1,
-                3,
-                padding=1,
-                conv_cfg=self.conv_cfg,
-                norm_cfg=dict(type='BN', requires_grad=True)
-            )
-
-            # 不用上采样，直接用下采样之前的feature
-            # self.upsamplev1 = ConvModule(
-            #     1, 
-            #     16, 
-            #     1,
-            #     padding=0,
-            #     norm_cfg=dict(type='BN', requires_grad=True)
-            # )
-            # self.upsamplev2 = ConvModule(
-            #     16, 
-            #     64, 
-            #     1,
-            #     padding=0,
-            #     norm_cfg=dict(type='BN', requires_grad=True)
-            # )
-            self.maskROIConv = nn.Sequential(
-                ConvModule(
-                    64, 
-                    16, 
-                    1,
-                    padding=0,
-                    norm_cfg=dict(type='BN', requires_grad=True)),
-                ConvModule(
-                    16, 
-                    16, 
-                    3,
-                    padding=2,
-                    stride=1,
-                    dilation=2,
-                    norm_cfg=dict(type='BN', requires_grad=True)),
-                ConvModule(
-                    16, 
-                    64, 
-                    1,
-                    padding=0,
-                    norm_cfg=dict(type='BN', requires_grad=True))
-            )
-        # self.loss_mask = SmoothL1Loss(beta=1.0 / 9.0, loss_weight=1.0)
-        self.loss_mask = torch.nn.MSELoss()
 
     def forward(self, inputs):
         inputs, gt_bboxes = inputs
@@ -238,50 +171,4 @@ class BFP(BaseModule):
             outs.append(residual + inputs[i])
             # outs.append(residual * 1 / (i + 1) + inputs[i])
 
-        # 对fpn所有层进行mask监督
-        if self.with_mask_loss:
-            outs_upsample = []
-            loss_mask = []
-            for i in range(self.num_levels):
-                out = outs[i]
-                mask1 = self.maskconv1(out)
-                mask2 = self.maskconv2(mask1)
-                mask3 = self.maskconv3(mask2)
-                # plt.imshow(mask3.squeeze(1)[0].cpu().detach().numpy())
-                # plt.savefig('3.jpg')
-                # a = input("aaaa")
-                # mask = F.interpolate(mask3, size=[mask_size[0] * 4, mask_size[1] * 4], mode='nearest')
-                if gt_bboxes is not None:
-                    mask_size = out.size()[2:]
-                    heatmaps = []
-                    # x = 0
-                    for gt_bbox in gt_bboxes:
-                        heatmap = torch.zeros([mask_size[0], mask_size[1]], device=gt_bboxes[0].device)
-                        # center = (gt_bbox / 16)
-                        center = gt_bbox / (2 ** (i + 2))
-                        Ws = center[:, 2] - center[:, 0]
-                        Hs = center[:, 3] - center[:, 1]
-                        center = center[:, :2] + (center[:, 2:] - center[:, :2]) / 2
-                        center = torch.clamp(center, 0)
-                        for cen, w, h in zip(center, Ws, Hs):
-                            # heatmap = gen_gaussian_target(heatmap, cen, w/2, h/2)
-                            heatmap = gen_gaussian_target(heatmap, cen, w/4, h/4)
-                        heatmaps.append(heatmap)
-                        # plt.imshow(heatmap.cpu().numpy())
-                        # plt.savefig(str(x)+'.jpg')
-                    heatmaps = torch.stack(heatmaps)
-                    loss_mask.append(self.loss_mask(mask3.squeeze(1), heatmaps))
-                # upsample1 = self.upsamplev1(mask3)
-                # upsample2 = self.upsamplev2(upsample1)
-                maskROI = self.maskROIConv(mask1) + mask1
-                outs_upsample.append(maskROI)
-                # outs[i] = torch.cat([out, upsample2], dim=1)
-            loss_mask = sum(loss_mask)
-
-        if self.with_mask_loss:
-            if gt_bboxes is not None:
-                return tuple(outs), tuple(outs_upsample), dict(loss_mask=loss_mask)
-            else:
-                return tuple(outs), tuple(outs_upsample), None
-        else:
-            return tuple(outs), None, None
+        return tuple(outs), None

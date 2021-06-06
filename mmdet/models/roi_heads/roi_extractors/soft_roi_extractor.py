@@ -20,6 +20,54 @@ class SoftRoIExtractor(BaseRoIExtractor):
         self.finest_scale = finest_scale
         self.spatial_attention_conv=nn.Sequential(nn.Conv2d(out_channels*len(featmap_strides), out_channels, 1), nn.ReLU(), nn.Conv2d(out_channels,len(featmap_strides),3, padding=1))
     
+    def map_roi_levels(self, rois, num_levels):
+        """Map rois to corresponding feature levels by scales.
+
+        - scale < finest_scale * 2: level 0
+        - finest_scale * 2 <= scale < finest_scale * 4: level 1
+        - finest_scale * 4 <= scale < finest_scale * 8: level 2
+        - scale >= finest_scale * 8: level 3
+
+        Args:
+            rois (Tensor): Input RoIs, shape (k, 5).
+            num_levels (int): Total level number.
+
+        Returns:
+            Tensor: Level index (0-based) of each RoI, shape (k, )
+        """
+        scale = torch.sqrt(
+            (rois[:, 3] - rois[:, 1]) * (rois[:, 4] - rois[:, 2]))
+        target_lvls = torch.floor(torch.log2(scale / self.finest_scale + 1e-6))
+        target_lvls = target_lvls.clamp(min=0, max=num_levels - 1).long()
+        return target_lvls
+
+    def roi_rescale(self, rois, num_levels, level):
+        """Scale RoI coordinates by scale factor.
+
+        Args:
+            rois (torch.Tensor): RoI (Region of Interest), shape (n, 5)
+            scale_factor (float): Scale factor that RoI will be multiplied by.
+
+        Returns:
+            torch.Tensor: Scaled RoI.
+        """
+        rois_lvls = torch.zeros(num_levels, rois.shape[0], 5)
+        for i in range(num_levels):
+            scale_factor = 2 ** (i - level)
+            cx = (rois[:, 1] + rois[:, 3]) * 0.5
+            cy = (rois[:, 2] + rois[:, 4]) * 0.5
+            w = rois[:, 3] - rois[:, 1]
+            h = rois[:, 4] - rois[:, 2]
+            new_w = w * scale_factor
+            new_h = h * scale_factor
+            x1 = cx - new_w * 0.5
+            x2 = cx + new_w * 0.5
+            y1 = cy - new_h * 0.5
+            y2 = cy + new_h * 0.5
+            new_rois = torch.stack((rois[:, 0], x1, y1, x2, y2), dim=-1)
+            rois_lvls[i] = new_rois
+        return rois_lvls
+
     @force_fp32(apply_to=('feats', ), out_fp16=True)
     def forward(self, feats, rois, roi_scale_factor=None):
         """Forward function."""
@@ -46,12 +94,20 @@ class SoftRoIExtractor(BaseRoIExtractor):
 
         # target_lvls = self.map_roi_levels(rois, num_levels)
 
-        if roi_scale_factor is not None:
-            rois = self.roi_rescale(rois, roi_scale_factor)
+        target_lvls = self.map_roi_levels(rois, num_levels)
+        roi_lvls = []
+        for i in range(num_levels):
+            mask = target_lvls == i
+            inds = mask.nonzero(as_tuple=False).squeeze(1)
+            if inds.numel() > 0:
+                rois_ = rois[inds]
+                roi_lvl = self.roi_rescale(rois_, num_levels, i)
+                roi_lvls.append(roi_lvl)
+        roi_lvls = torch.cat(roi_lvls, 1).to(device=rois.device)
         
         roi_feats_list = []
         for i in range(num_levels):
-            roi_feats_list.append(self.roi_layers[i](feats[i], rois))
+            roi_feats_list.append(self.roi_layers[i](feats[i], roi_lvls[i]))
         concat_roi_feats = torch.cat(roi_feats_list, dim=1)
         spatial_attention_map = self.spatial_attention_conv(concat_roi_feats)
         for i in range(num_levels):

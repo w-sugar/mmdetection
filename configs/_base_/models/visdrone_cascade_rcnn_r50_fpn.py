@@ -16,6 +16,7 @@ model = dict(
         in_channels=[256, 512, 1024, 2048],
         out_channels=256,
         num_outs=5),
+        # with_ExtraMask=[256,5,True]),
         # dict(
         #     type='WJF_P',
         #     in_channels=256,
