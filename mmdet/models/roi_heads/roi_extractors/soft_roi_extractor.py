@@ -18,7 +18,10 @@ class SoftRoIExtractor(BaseRoIExtractor):
         super(SoftRoIExtractor, self).__init__(roi_layer, out_channels,
                                                  featmap_strides, init_cfg)
         self.finest_scale = finest_scale
-        self.spatial_attention_conv=nn.Sequential(nn.Conv2d(out_channels*len(featmap_strides), out_channels, 1), nn.ReLU(), nn.Conv2d(out_channels,len(featmap_strides),3, padding=1))
+        # self.spatial_attention_conv=nn.Sequential(nn.Conv2d(out_channels*len(featmap_strides), out_channels, 1), nn.ReLU(), nn.Conv2d(out_channels,len(featmap_strides),3, padding=1))
+        self.self_attn1 = nn.MultiheadAttention(256, 2, dropout=0.1)
+        self.dropout1 = nn.Dropout(0.1)
+        self.norm1 = nn.LayerNorm(256)
     
     def map_roi_levels(self, rois, num_levels):
         """Map rois to corresponding feature levels by scales.
@@ -95,21 +98,48 @@ class SoftRoIExtractor(BaseRoIExtractor):
         # target_lvls = self.map_roi_levels(rois, num_levels)
 
         target_lvls = self.map_roi_levels(rois, num_levels)
-        roi_lvls = []
+        # roi_lvls = []
+        # for i in range(num_levels):
+        #     mask = target_lvls == i
+        #     inds = mask.nonzero(as_tuple=False).squeeze(1)
+        #     if inds.numel() > 0:
+        #         rois_ = rois[inds]
+        #         roi_lvl = self.roi_rescale(rois_, num_levels, i)
+        #         roi_lvls.append(roi_lvl)
+        # roi_lvls = torch.cat(roi_lvls, 1).to(device=rois.device)
+        
+        roi_feats_list_v = []
+        roi_feats_list_q = []
+        roi_feats_list_k = []
         for i in range(num_levels):
             mask = target_lvls == i
             inds = mask.nonzero(as_tuple=False).squeeze(1)
             if inds.numel() > 0:
+                q_i = max(0, i - 1)
+                k_i = min(num_levels-1, i+1)
                 rois_ = rois[inds]
-                roi_lvl = self.roi_rescale(rois_, num_levels, i)
-                roi_lvls.append(roi_lvl)
-        roi_lvls = torch.cat(roi_lvls, 1).to(device=rois.device)
-        
-        roi_feats_list = []
-        for i in range(num_levels):
-            roi_feats_list.append(self.roi_layers[i](feats[i], roi_lvls[i]))
-        concat_roi_feats = torch.cat(roi_feats_list, dim=1)
-        spatial_attention_map = self.spatial_attention_conv(concat_roi_feats)
-        for i in range(num_levels):
-            roi_feats += (F.sigmoid(spatial_attention_map[:, i, None, :, :]) * roi_feats_list[i])
+                roi_feats_v = self.roi_layers[i](feats[i], rois_).flatten(2).permute(2, 0, 1)
+                roi_feats_q = self.roi_layers[q_i](feats[q_i], rois_).flatten(2).permute(2, 0, 1)
+                roi_feats_k = self.roi_layers[k_i](feats[k_i], rois_).flatten(2).permute(2, 0, 1)
+                pro_features = self.self_attn1(roi_feats_q, roi_feats_k, value=roi_feats_v)[0]
+                pro_features = roi_feats_v + self.dropout1(pro_features)
+                pro_features = self.norm1(pro_features)
+                pro_features = pro_features.permute(1, 2, 0).view(rois_.shape[0], 256, 7, 7)
+
+                roi_feats[inds] = pro_features
+            else:
+                # Sometimes some pyramid levels will not be used for RoI
+                # feature extraction and this will cause an incomplete
+                # computation graph in one GPU, which is different from those
+                # in other GPUs and will cause a hanging error.
+                # Therefore, we add it to ensure each feature pyramid is
+                # included in the computation graph to avoid runtime bugs.
+                roi_feats += sum(
+                    x.view(-1)[0]
+                    for x in self.parameters()) * 0. + feats[i].sum() * 0.
+
+        # concat_roi_feats = torch.cat(roi_feats_list, dim=1)
+        # spatial_attention_map = self.spatial_attention_conv(concat_roi_feats)
+        # for i in range(num_levels):
+        #     roi_feats += (F.sigmoid(spatial_attention_map[:, i, None, :, :]) * roi_feats_list[i])
         return roi_feats
