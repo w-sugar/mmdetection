@@ -7,6 +7,7 @@ from ..builder import NECKS
 import torch
 from torch import nn
 from ..losses import SmoothL1Loss
+from ..losses import FocalLoss
 import matplotlib.pyplot as plt
 
 def gaussian2D(radius_x, radius_y, sigma_x=1, sigma_y=1, dtype=torch.float32, device='cpu'):
@@ -103,6 +104,7 @@ def gen_rect_target(heatmap, center, radius_x, radius_y, k=1):
     top, bottom = min(y, radius_y), min(height - y, radius_y + 1)
 
     masked_heatmap = heatmap[y - top:y + bottom, x - left:x + right]
+    # masked_rect = torch.ones(bottom+top, right+left, device=heatmap.device).to(torch.long)
     masked_rect = torch.ones(bottom+top, right+left, device=heatmap.device)
     out_heatmap = heatmap
     torch.max(
@@ -194,8 +196,15 @@ class ExtraMask(BaseModule):
                     padding=0,
                     norm_cfg=dict(type='BN', requires_grad=True))
             )
+            self.mask_upsample = ConvModule(
+                                    64, 
+                                    256, 
+                                    1,
+                                    padding=0,
+                                    norm_cfg=dict(type='BN', requires_grad=True))
         # self.loss_mask = SmoothL1Loss(beta=1.0 / 9.0, loss_weight=1.0)
         self.loss_mask = torch.nn.MSELoss()
+        # self.loss_mask = FocalLoss()
 
     def forward(self, inputs):
         inputs, gt_bboxes = inputs
@@ -219,6 +228,7 @@ class ExtraMask(BaseModule):
                 heatmaps = []
                 # x = 0
                 for gt_bbox in gt_bboxes:
+                    # heatmap = torch.zeros([mask_size[0], mask_size[1]], device=gt_bboxes[0].device).to(torch.long)
                     heatmap = torch.zeros([mask_size[0], mask_size[1]], device=gt_bboxes[0].device)
                     # center = (gt_bbox / 16)
                     center = gt_bbox / (2 ** (i + 2))
@@ -233,12 +243,15 @@ class ExtraMask(BaseModule):
                     heatmaps.append(heatmap)
                     # plt.imshow(heatmap.cpu().numpy())
                     # plt.savefig(str(x)+'.jpg')
+                # heatmaps = torch.stack(heatmaps).flatten(0)
                 heatmaps = torch.stack(heatmaps)
+                # loss_mask.append(self.loss_mask(mask3.squeeze(1).flatten(0).unsqueeze(1), heatmaps))
                 loss_mask.append(self.loss_mask(mask3.squeeze(1), heatmaps))
             # upsample1 = self.upsamplev1(mask3)
             # upsample2 = self.upsamplev2(upsample1)
             if self.with_mask_pooling:
                 maskROI = self.maskROIConv(mask1) + mask1
+                maskROI = self.mask_upsample(maskROI)
                 outs_upsample.append(maskROI)
             # outs[i] = torch.cat([out, upsample2], dim=1)
         loss_mask = sum(loss_mask)
