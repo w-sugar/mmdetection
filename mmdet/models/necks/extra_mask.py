@@ -10,6 +10,52 @@ from ..losses import SmoothL1Loss
 from ..losses import FocalLoss
 import matplotlib.pyplot as plt
 
+from torch.nn.parameter import Parameter
+from torch.nn.modules.loss import _Loss
+import numpy as np
+
+def gaussian_kernel(size, sigma):
+    x, y = np.mgrid[-size:size+1, -size:size+1]
+    kernel = np.exp(-0.5*(x*x+y*y)/(sigma*sigma))
+    kernel /= kernel.sum()
+    return kernel
+
+class SSIM_Loss(_Loss):
+    def __init__(self, in_channels, size=11, sigma=1.5, size_average=True):
+        super(SSIM_Loss, self).__init__(size_average)
+        #assert in_channels == 1, 'Only support single-channel input'
+        self.in_channels = in_channels
+        self.size = int(size)
+        self.sigma = sigma
+        self.size_average = size_average
+
+        kernel = gaussian_kernel(self.size, self.sigma)
+        self.kernel_size = kernel.shape
+        weight = np.tile(kernel, (in_channels, 1, 1, 1))
+        self.weight = Parameter(torch.from_numpy(weight).float(), requires_grad=False)
+
+    def forward(self, input, target, mask=None):
+        #_assert_no_grad(target)
+        mean1 = F.conv2d(input, self.weight, padding=self.size, groups=self.in_channels)
+        mean2 = F.conv2d(target, self.weight, padding=self.size, groups=self.in_channels)
+        mean1_sq = mean1*mean1
+        mean2_sq = mean2*mean2
+        mean_12 = mean1*mean2
+
+        sigma1_sq = F.conv2d(input*input, self.weight, padding=self.size, groups=self.in_channels) - mean1_sq
+        sigma2_sq = F.conv2d(target*target, self.weight, padding=self.size, groups=self.in_channels) - mean2_sq
+        sigma_12 = F.conv2d(input*target, self.weight, padding=self.size, groups=self.in_channels) - mean_12
+    
+        C1 = 0.01**2
+        C2 = 0.03**2
+
+        ssim = ((2*mean_12+C1)*(2*sigma_12+C2)) / ((mean1_sq+mean2_sq+C1)*(sigma1_sq+sigma2_sq+C2))
+        if self.size_average:
+            out = 1 - ssim.mean()
+        else:
+            out = 1 - ssim.view(ssim.size(0), -1).mean(1)
+        return out
+
 def gaussian2D(radius_x, radius_y, sigma_x=1, sigma_y=1, dtype=torch.float32, device='cpu'):
     """Generate 2D gaussian kernel.
 
@@ -121,6 +167,7 @@ class ExtraMask(BaseModule):
                  in_channels,
                  num_levels,
                  with_mask_pooling=False,
+                 with_mask_cac=False,
                  conv_cfg=None,
                  norm_cfg=None,
                  init_cfg=dict(
@@ -128,6 +175,7 @@ class ExtraMask(BaseModule):
         super(ExtraMask, self).__init__(init_cfg)
 
         self.with_mask_pooling = with_mask_pooling
+        self.with_mask_cac = with_mask_cac
         self.in_channels = in_channels
         self.num_levels = num_levels
         self.conv_cfg = conv_cfg
@@ -202,9 +250,13 @@ class ExtraMask(BaseModule):
                                     1,
                                     padding=0,
                                     norm_cfg=dict(type='BN', requires_grad=True))
+            if with_mask_cac:
+                self.spatial_attention_conv=nn.Sequential(nn.Conv2d(in_channels*2, in_channels, 1), nn.ReLU(), nn.Conv2d(in_channels,2,3, padding=1))
+                # self.channel_attention_conv=nn.Sequential(nn.AdaptiveAvgPool2d((1,1)), nn.Conv2d(in_channels*2, in_channels, 1), nn.ReLU(), nn.Conv2d(in_channels, in_channels*2, 1))
         # self.loss_mask = SmoothL1Loss(beta=1.0 / 9.0, loss_weight=1.0)
         self.loss_mask = torch.nn.MSELoss()
         # self.loss_mask = FocalLoss()
+        self.ssim = SSIM_Loss(in_channels=1, size=7)
 
     def forward(self, inputs):
         inputs, gt_bboxes = inputs
@@ -214,6 +266,7 @@ class ExtraMask(BaseModule):
         # 对fpn所有层进行mask监督
         outs_upsample = []
         loss_mask = []
+        loss_ssim = []
         for i in range(self.num_levels):
             out = inputs[i]
             mask1 = self.maskconv1(out)
@@ -247,19 +300,39 @@ class ExtraMask(BaseModule):
                 heatmaps = torch.stack(heatmaps)
                 # loss_mask.append(self.loss_mask(mask3.squeeze(1).flatten(0).unsqueeze(1), heatmaps))
                 loss_mask.append(self.loss_mask(mask3.squeeze(1), heatmaps))
+                loss_ssim.append(self.ssim(mask3, heatmaps.unsqueeze(1)))
             # upsample1 = self.upsamplev1(mask3)
             # upsample2 = self.upsamplev2(upsample1)
             if self.with_mask_pooling:
                 maskROI = self.maskROIConv(mask1) + mask1
                 maskROI = self.mask_upsample(maskROI)
-                outs_upsample.append(maskROI)
+                if self.with_mask_cac:
+                    fusion_feature = torch.cat([out, maskROI], dim=1)
+                    '''
+                    channel_attention_conv = F.sigmoid(self.channel_attention_conv(fusion_feature))
+                    feats_post = channel_attention_conv * fusion_feature
+                    feats_x, feats_mask = torch.split(feats_post, [256, 256], 1)
+                    outs_upsample.append(feats_x + feats_mask)
+                    '''
+                    spatial_attention_conv = F.sigmoid(self.spatial_attention_conv(fusion_feature))
+                    feats_post = spatial_attention_conv[:, 0, None, :, :] * out + spatial_attention_conv[:, 1, None, :, :] * maskROI
+                    outs_upsample.append(feats_post)
+                else:
+                    outs_upsample.append(maskROI)
             # outs[i] = torch.cat([out, upsample2], dim=1)
         loss_mask = sum(loss_mask)
+        loss_ssim = sum(loss_ssim) * 0.1
 
         if self.with_mask_pooling:
             if gt_bboxes is not None:
-                return inputs, tuple(outs_upsample), dict(loss_mask=loss_mask)
+                if self.with_mask_cac:
+                    return tuple(outs_upsample), None, dict(loss_mask=loss_mask, loss_ssim=loss_ssim)
+                else:
+                    return inputs, tuple(outs_upsample), dict(loss_mask=loss_mask, loss_ssim=loss_ssim)
             else:
-                return inputs, tuple(outs_upsample), None
+                if self.with_mask_cac:
+                    return tuple(outs_upsample), None, None
+                else:
+                    return inputs, tuple(outs_upsample), None
         else:
             return inputs, None, None

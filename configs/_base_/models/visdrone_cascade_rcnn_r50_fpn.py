@@ -16,7 +16,8 @@ model = dict(
         in_channels=[256, 512, 1024, 2048],
         out_channels=256,
         num_outs=5,
-        with_ExtraMask=[256,5,True]),
+        # fusion_factors=[1.317, 0.725, 0.469]),
+        with_ExtraMask=[256,5,True,True]),
         # dict(
         #     type='WJF_P',
         #     in_channels=256,
@@ -57,9 +58,9 @@ model = dict(
         num_stages=3,
         stage_loss_weights=[1, 0.5, 0.25],
         bbox_roi_extractor=dict(
-            # type='SingleRoIExtractor',
+            type='SingleRoIExtractor',
             # type='SoftRoIExtractor',
-            type='MaskRoIExtractor',
+            # type='MaskRoIExtractor',
             roi_layer=dict(type='RoIAlign', output_size=7, sampling_ratio=0),
             out_channels=256,#256+64,
             featmap_strides=[4, 8, 16, 32]),

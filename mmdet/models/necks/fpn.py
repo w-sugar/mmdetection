@@ -71,6 +71,7 @@ class FPN(BaseModule):
                  num_outs,
                  start_level=0,
                  end_level=-1,
+                 fusion_factors=[1,1,1],
                  add_extra_convs=False,
                  extra_convs_on_inputs=True,
                  relu_before_extra_convs=False,
@@ -163,11 +164,12 @@ class FPN(BaseModule):
                     act_cfg=act_cfg,
                     inplace=False)
                 self.fpn_convs.append(extra_fpn_conv)
+        self.fusion_factors = fusion_factors
         
         # ExtraMask
         self.with_ExtraMask = with_ExtraMask
         if with_ExtraMask is not None:
-            self.ExtraMask = ExtraMask(with_ExtraMask[0], with_ExtraMask[1], with_ExtraMask[2])
+            self.ExtraMask = ExtraMask(with_ExtraMask[0], with_ExtraMask[1], with_ExtraMask[2], with_ExtraMask[3])
 
 
     @auto_fp16()
@@ -193,7 +195,7 @@ class FPN(BaseModule):
             else:
                 prev_shape = laterals[i - 1].shape[2:]
                 laterals[i - 1] += F.interpolate(
-                    laterals[i], size=prev_shape, **self.upsample_cfg)
+                    laterals[i], size=prev_shape, **self.upsample_cfg) * self.fusion_factors[i - 1]
 
         # build outputs
         # part 1: from original levels
@@ -226,5 +228,5 @@ class FPN(BaseModule):
         
         if self.with_ExtraMask is not None:
             return self.ExtraMask((tuple(outs), gt_bboxes))
-        return (tuple(outs), gt_bboxes)
-        # return tuple(outs), None, None
+        # return (tuple(outs), gt_bboxes)
+        return tuple(outs), None, None
