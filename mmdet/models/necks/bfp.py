@@ -171,4 +171,4 @@ class BFP(BaseModule):
             outs.append(residual + inputs[i])
             # outs.append(residual * 1 / (i + 1) + inputs[i])
 
-        return tuple(outs), None
+        return tuple(outs), None, None

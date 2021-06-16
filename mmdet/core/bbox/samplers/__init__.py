@@ -7,9 +7,10 @@ from .pseudo_sampler import PseudoSampler
 from .random_sampler import RandomSampler
 from .sampling_result import SamplingResult
 from .score_hlr_sampler import ScoreHLRSampler
+from .class_balanced_pos_sampler import ClassBalancedPosSampler
 
 __all__ = [
     'BaseSampler', 'PseudoSampler', 'RandomSampler',
     'InstanceBalancedPosSampler', 'IoUBalancedNegSampler', 'CombinedSampler',
-    'OHEMSampler', 'SamplingResult', 'ScoreHLRSampler'
+    'OHEMSampler', 'SamplingResult', 'ScoreHLRSampler', 'ClassBalancedPosSampler'
 ]

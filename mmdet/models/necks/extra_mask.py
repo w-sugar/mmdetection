@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 from torch.nn.parameter import Parameter
 from torch.nn.modules.loss import _Loss
 import numpy as np
+import cv2
 
 def gaussian_kernel(size, sigma):
     x, y = np.mgrid[-size:size+1, -size:size+1]
@@ -256,7 +257,7 @@ class ExtraMask(BaseModule):
         # self.loss_mask = SmoothL1Loss(beta=1.0 / 9.0, loss_weight=1.0)
         self.loss_mask = torch.nn.MSELoss()
         # self.loss_mask = FocalLoss()
-        self.ssim = SSIM_Loss(in_channels=1, size=7)
+        # self.ssim = SSIM_Loss(in_channels=1, size=5)
 
     def forward(self, inputs):
         inputs, gt_bboxes = inputs
@@ -293,6 +294,10 @@ class ExtraMask(BaseModule):
                         # heatmap = gen_gaussian_target(heatmap, cen, w/2, h/2)
                         # heatmap = gen_gaussian_target(heatmap, cen, w/4, h/4)
                         heatmap = gen_rect_target(heatmap, cen, w/2, h/2)
+                        # 使用高斯核平滑heatmap
+                        # heatmap = heatmap.cpu().numpy()
+                        # heatmap = cv2.GaussianBlur(heatmap,(3,3),0)
+                        # heatmap = torch.from_numpy(heatmap).to(device=gt_bboxes[0].device)
                     heatmaps.append(heatmap)
                     # plt.imshow(heatmap.cpu().numpy())
                     # plt.savefig(str(x)+'.jpg')
@@ -300,7 +305,7 @@ class ExtraMask(BaseModule):
                 heatmaps = torch.stack(heatmaps)
                 # loss_mask.append(self.loss_mask(mask3.squeeze(1).flatten(0).unsqueeze(1), heatmaps))
                 loss_mask.append(self.loss_mask(mask3.squeeze(1), heatmaps))
-                loss_ssim.append(self.ssim(mask3, heatmaps.unsqueeze(1)))
+                # loss_ssim.append(self.ssim(mask3, heatmaps.unsqueeze(1)))
             # upsample1 = self.upsamplev1(mask3)
             # upsample2 = self.upsamplev2(upsample1)
             if self.with_mask_pooling:
@@ -317,18 +322,25 @@ class ExtraMask(BaseModule):
                     spatial_attention_conv = F.sigmoid(self.spatial_attention_conv(fusion_feature))
                     feats_post = spatial_attention_conv[:, 0, None, :, :] * out + spatial_attention_conv[:, 1, None, :, :] * maskROI
                     outs_upsample.append(feats_post)
+                    # channel_attention_conv = F.sigmoid(self.channel_attention_conv(fusion_feature))
+                    # feats_post = channel_attention_conv * fusion_feature
+                    # feats_x, feats_mask = torch.split(channel_attention_conv, [256, 256], 1)
+
+                    # spatial_attention_conv = F.sigmoid(self.spatial_attention_conv(fusion_feature))
+                    # feats_post = spatial_attention_conv[:, 0, None, :, :] * out * feats_x + spatial_attention_conv[:, 1, None, :, :] * maskROI * feats_mask
+                    # outs_upsample.append(feats_post)
                 else:
                     outs_upsample.append(maskROI)
             # outs[i] = torch.cat([out, upsample2], dim=1)
-        loss_mask = sum(loss_mask)
-        loss_ssim = sum(loss_ssim) * 0.1
+        loss_mask = sum(loss_mask) * 1.5
+        # loss_ssim = sum(loss_ssim) * 0.01
 
         if self.with_mask_pooling:
             if gt_bboxes is not None:
                 if self.with_mask_cac:
-                    return tuple(outs_upsample), None, dict(loss_mask=loss_mask, loss_ssim=loss_ssim)
+                    return tuple(outs_upsample), None, dict(loss_mask=loss_mask)
                 else:
-                    return inputs, tuple(outs_upsample), dict(loss_mask=loss_mask, loss_ssim=loss_ssim)
+                    return inputs, tuple(outs_upsample), dict(loss_mask=loss_mask)
             else:
                 if self.with_mask_cac:
                     return tuple(outs_upsample), None, None

@@ -468,6 +468,8 @@ class TailCascadeRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
         rcnn_test_cfg = self.test_cfg
         aug_bboxes = []
         aug_scores = []
+        aug_bboxes_tail = []
+        aug_scores_tail = []
         for x, img_meta in zip(features, img_metas):
             # only one image in the batch
             img_shape = img_meta[0]['img_shape']
@@ -513,7 +515,7 @@ class TailCascadeRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
                 scale_factor,
                 rescale=False,
                 cfg=None)
-            print('a', bboxes.shape)
+            # print('a', bboxes.shape, scores.shape)
             cls_score_tail = sum(ms_scores_tail) / float(len(ms_scores_tail))
             bboxes_tail, scores_tail = self.bbox_head_tail[-1].get_bboxes(
                 rois_tail,
@@ -523,37 +525,78 @@ class TailCascadeRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
                 scale_factor,
                 rescale=False,
                 cfg=None)
-            print('b', bboxes_tail.shape)
+            # print('b', bboxes_tail.shape, scores_tail.shape)
+            # print(scores_tail)
+            # print(scores)
+            # if self.labels is not None:
+            #     inds = []
+            #     for label in self.labels:
+            #         inds.append(torch.nonzero(scores == label, as_tuple=False).squeeze(1))
+            #     inds = torch.cat(inds)
+            #     bboxes = bboxes[inds]
+            #     scores = scores[inds]
+            # if self.labels_tail is not None:
+            #     inds = []
+            #     for label in self.labels_tail:
+            #         inds.append(torch.nonzero(scores_tail == label, as_tuple=False).squeeze(1))
+            #     inds = torch.cat(inds)
+            #     bboxes_tail = bboxes_tail[inds]
+            #     scores_tail = scores_tail[inds]
+            # print(bboxes,bboxes.shape)
+            # print(bboxes_tail, bboxes_tail.shape)
+            # if bboxes.shape[0] == 0:
+            #     det_bboxes = bboxes_tail
+            #     det_labels = scores_tail
+            # elif bboxes_tail.shape[0] == 0:
+            #     det_bboxes = bboxes
+            #     det_labels = scores
+            # else:
+            #     det_bboxes = torch.cat((bboxes, bboxes_tail))
+            #     det_labels = torch.cat((scores, scores_tail))
 
-            if self.labels is not None:
-                inds = []
-                for label in self.labels:
-                    inds.append(torch.nonzero(scores == label, as_tuple=False).squeeze(1))
-                inds = torch.cat(inds)
-                bboxes = bboxes[inds]
-                scores = scores[inds]
-            if self.labels_tail is not None:
-                inds = []
-                for label in self.labels_tail:
-                    inds.append(torch.nonzero(scores_tail == label, as_tuple=False).squeeze(1))
-                inds = torch.cat(inds)
-                bboxes_tail = bboxes_tail[inds]
-                scores_tail = scores_tail[inds]
-            print(bboxes.shape)
-            print(bboxes_tail.shape)
-            det_bboxes = torch.cat((bboxes, bboxes_tail))
-            det_labels = torch.cat((scores, scores_tail))
-
-            aug_bboxes.append(det_bboxes)
-            aug_scores.append(det_labels)
+            # aug_bboxes.append(det_bboxes)
+            # aug_scores.append(det_labels)
+            # print('c', det_bboxes.shape)
+            # print('d', det_labels.shape)
+            aug_bboxes.append(bboxes)
+            aug_scores.append(scores)
+            aug_bboxes_tail.append(bboxes_tail)
+            aug_scores_tail.append(scores_tail)
 
         # after merging, bboxes will be rescaled to the original image size
         merged_bboxes, merged_scores = merge_aug_bboxes(
             aug_bboxes, aug_scores, img_metas, rcnn_test_cfg)
+        # print('e', merged_bboxes.shape, merged_scores.shape)
         det_bboxes, det_labels = multiclass_nms(merged_bboxes, merged_scores,
                                                 rcnn_test_cfg.score_thr,
                                                 rcnn_test_cfg.nms,
                                                 rcnn_test_cfg.max_per_img)
+
+        # after merging, bboxes will be rescaled to the original image size
+        merged_bboxes_tail, merged_scores_tail = merge_aug_bboxes(
+            aug_bboxes_tail, aug_scores_tail, img_metas, rcnn_test_cfg)
+        # print('e', merged_bboxes.shape, merged_scores.shape)
+        det_bboxes_tail, det_labels_tail = multiclass_nms(merged_bboxes_tail, merged_scores_tail,
+                                                rcnn_test_cfg.score_thr,
+                                                rcnn_test_cfg.nms,
+                                                rcnn_test_cfg.max_per_img)
+        if self.labels is not None:
+            inds = []
+            for label in self.labels:
+                inds.append(torch.nonzero(det_labels == label, as_tuple=False).squeeze(1))
+            inds = torch.cat(inds)
+            det_bboxes_post = det_bboxes[inds]
+            det_labels_post = det_labels[inds]
+        if self.labels_tail is not None:
+            inds = []
+            for label in self.labels_tail:
+                inds.append(torch.nonzero(det_labels_tail == label, as_tuple=False).squeeze(1))
+            inds = torch.cat(inds)
+            det_bboxes_tail_post = det_bboxes_tail[inds]
+            det_labels_tail_post = det_labels_tail[inds]
+
+        det_bboxes = torch.cat((det_bboxes_post, det_bboxes_tail_post))
+        det_labels = torch.cat((det_labels_post, det_labels_tail_post))
 
         bbox_result = bbox2result(det_bboxes, det_labels,
                                   self.bbox_head[-1].num_classes)
@@ -590,6 +633,99 @@ class TailCascadeRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
                     ori_shape,
                     scale_factor=1.0,
                     rescale=False)
-            return bbox_result, segm_result
+            return [(bbox_result, segm_result)]
         else:
-            return bbox_result
+            return [bbox_result]
+
+    def aug_test_(self, features, proposal_list, img_metas, rescale=False):
+        """Test with augmentations.
+
+        If rescale is False, then returned bboxes and masks will fit the scale
+        of imgs[0].
+        """
+        rcnn_test_cfg = self.test_cfg
+        aug_bboxes = []
+        aug_scores = []
+        for x, img_meta in zip(features, img_metas):
+            # only one image in the batch
+            img_shape = img_meta[0]['img_shape']
+            scale_factor = img_meta[0]['scale_factor']
+            flip = img_meta[0]['flip']
+            flip_direction = img_meta[0]['flip_direction']
+
+            proposals = bbox_mapping(proposal_list[0][:, :4], img_shape,
+                                     scale_factor, flip, flip_direction)
+            # "ms" in variable names means multi-stage
+            ms_scores = []
+
+            rois = bbox2roi([proposals])
+            for i in range(self.num_stages):
+                bbox_results = self._bbox_forward(i, x, rois)
+                ms_scores.append(bbox_results['cls_score'])
+
+                if i < self.num_stages - 1:
+                    bbox_label = bbox_results['cls_score'][:, :-1].argmax(
+                        dim=1)
+                    rois = self.bbox_head[i].regress_by_class(
+                        rois, bbox_label, bbox_results['bbox_pred'],
+                        img_meta[0])
+
+            cls_score = sum(ms_scores) / float(len(ms_scores))
+            bboxes, scores = self.bbox_head[-1].get_bboxes(
+                rois,
+                cls_score,
+                bbox_results['bbox_pred'],
+                img_shape,
+                scale_factor,
+                rescale=False,
+                cfg=None)
+            aug_bboxes.append(bboxes)
+            aug_scores.append(scores)
+
+        # after merging, bboxes will be rescaled to the original image size
+        merged_bboxes, merged_scores = merge_aug_bboxes(
+            aug_bboxes, aug_scores, img_metas, rcnn_test_cfg)
+        det_bboxes, det_labels = multiclass_nms(merged_bboxes, merged_scores,
+                                                rcnn_test_cfg.score_thr,
+                                                rcnn_test_cfg.nms,
+                                                rcnn_test_cfg.max_per_img)
+
+        bbox_result = bbox2result(det_bboxes, det_labels,
+                                  self.bbox_head[-1].num_classes)
+
+        if self.with_mask:
+            if det_bboxes.shape[0] == 0:
+                segm_result = [[[]
+                                for _ in range(self.mask_head[-1].num_classes)]
+                               ]
+            else:
+                aug_masks = []
+                aug_img_metas = []
+                for x, img_meta in zip(features, img_metas):
+                    img_shape = img_meta[0]['img_shape']
+                    scale_factor = img_meta[0]['scale_factor']
+                    flip = img_meta[0]['flip']
+                    flip_direction = img_meta[0]['flip_direction']
+                    _bboxes = bbox_mapping(det_bboxes[:, :4], img_shape,
+                                           scale_factor, flip, flip_direction)
+                    mask_rois = bbox2roi([_bboxes])
+                    for i in range(self.num_stages):
+                        mask_results = self._mask_forward(i, x, mask_rois)
+                        aug_masks.append(
+                            mask_results['mask_pred'].sigmoid().cpu().numpy())
+                        aug_img_metas.append(img_meta)
+                merged_masks = merge_aug_masks(aug_masks, aug_img_metas,
+                                               self.test_cfg)
+
+                ori_shape = img_metas[0][0]['ori_shape']
+                segm_result = self.mask_head[-1].get_seg_masks(
+                    merged_masks,
+                    det_bboxes,
+                    det_labels,
+                    rcnn_test_cfg,
+                    ori_shape,
+                    scale_factor=1.0,
+                    rescale=False)
+            return [(bbox_result, segm_result)]
+        else:
+            return [bbox_result]
