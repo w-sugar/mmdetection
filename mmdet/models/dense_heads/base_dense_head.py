@@ -26,6 +26,7 @@ class BaseDenseHead(BaseModule, metaclass=ABCMeta):
                       gt_labels=None,
                       gt_bboxes_ignore=None,
                       proposal_cfg=None,
+                      nms_labels=None,
                       **kwargs):
         """
         Args:
@@ -55,5 +56,5 @@ class BaseDenseHead(BaseModule, metaclass=ABCMeta):
         if proposal_cfg is None:
             return losses
         else:
-            proposal_list = self.get_bboxes(*outs, img_metas, cfg=proposal_cfg)
+            proposal_list = self.get_bboxes(*outs, img_metas, cfg=proposal_cfg, gt_bboxes=gt_bboxes, gt_labels=nms_labels)
             return losses, proposal_list

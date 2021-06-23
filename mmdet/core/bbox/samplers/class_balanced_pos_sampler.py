@@ -116,8 +116,9 @@ class ClassBalancedPosSampler(RandomSampler):
         if pos_inds.numel() <= num_expected:
             return pos_inds
         elif assign_result.labels is None:
-            # print(pos_inds)
             return pos_inds
+        elif labels is None:
+            return self.random_choice(pos_inds, num_expected)
         else:
             sampled_inds = []
             for label in labels:

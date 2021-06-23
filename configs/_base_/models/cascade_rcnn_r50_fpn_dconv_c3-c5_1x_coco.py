@@ -16,8 +16,8 @@ model = dict(
         type='FPN',
         in_channels=[256, 512, 1024, 2048],
         out_channels=256,
-        num_outs=5,
-        with_ExtraMask=[256,5,True,True]),
+        num_outs=5),
+        # with_ExtraMask=[256,5,True,True]),
     rpn_head=dict(
         type='RPNHead',
         in_channels=256,
@@ -201,7 +201,7 @@ model = dict(
             nms=dict(type='nms', iou_threshold=0.7),
             min_bbox_size=0),
         rcnn=dict(
-            score_thr=0.00,
+            score_thr=0.05,
             nms=dict(type='nms', iou_threshold=0.5),
             max_per_img=500)))
 dataset_type = 'VisDroneDataset'
@@ -233,6 +233,7 @@ test_pipeline = [
         type='MultiScaleFlipAug',
         img_scale=[(1333, 800), (1999.5, 1200.0), (2666, 1600),
                    (3332.5, 2000.0), (3999, 2400)],
+        # img_scale=(1333, 800),
         flip=False,
         transforms=[
             dict(type='Resize', keep_ratio=True, bbox_clip_border=False),
@@ -248,7 +249,7 @@ test_pipeline = [
         ])
 ]
 data = dict(
-    samples_per_gpu=2,
+    samples_per_gpu=4,
     workers_per_gpu=2,
     train=dict(
         type='VisDroneDataset',
@@ -282,8 +283,9 @@ data = dict(
             dict(type='LoadImageFromFile'),
             dict(
                 type='MultiScaleFlipAug',
-                img_scale=[(1333, 800), (1999.5, 1200.0), (2666, 1600),
-                           (3332.5, 2000.0), (3999, 2400)],
+                # img_scale=[(1333, 800), (1999.5, 1200.0), (2666, 1600),
+                #            (3332.5, 2000.0), (3999, 2400)],
+                img_scale=(1333, 800),
                 flip=False,
                 transforms=[
                     dict(
@@ -310,6 +312,7 @@ data = dict(
                 type='MultiScaleFlipAug',
                 img_scale=[(1333, 800), (1999.5, 1200.0), (2666, 1600),
                            (3332.5, 2000.0), (3999, 2400)],
+                # img_scale=(1333, 800),
                 flip=False,
                 transforms=[
                     dict(

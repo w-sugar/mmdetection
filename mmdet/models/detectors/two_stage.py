@@ -134,7 +134,8 @@ class TwoStageDetector(BaseDetector):
                 gt_bboxes,
                 gt_labels=None,
                 gt_bboxes_ignore=gt_bboxes_ignore,
-                proposal_cfg=proposal_cfg)
+                proposal_cfg=proposal_cfg,
+                nms_labels=gt_labels)
             losses.update(rpn_losses)
         else:
             proposal_list = proposals
@@ -143,6 +144,10 @@ class TwoStageDetector(BaseDetector):
             for x_, mask_x_ in zip(x, mask_x):
                 new_x.append(torch.cat([x_, mask_x_], dim=1))
             x = tuple(new_x)
+        # roi_losses = self.roi_head.forward_train(x, img_metas, proposal_list, proposal_list_tail,
+        #                                          gt_bboxes, gt_labels,
+        #                                          gt_bboxes_ignore, gt_masks,
+        #                                          **kwargs)
         roi_losses = self.roi_head.forward_train(x, img_metas, proposal_list,
                                                  gt_bboxes, gt_labels,
                                                  gt_bboxes_ignore, gt_masks,

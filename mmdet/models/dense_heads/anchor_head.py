@@ -495,7 +495,9 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
                    img_metas,
                    cfg=None,
                    rescale=False,
-                   with_nms=True):
+                   with_nms=True,
+                   gt_bboxes=None,
+                   gt_labels=None):
         """Transform network output for a batch into bbox predictions.
 
         Args:
@@ -577,12 +579,12 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
             # some heads don't support with_nms argument
             result_list = self._get_bboxes(mlvl_cls_scores, mlvl_bbox_preds,
                                            mlvl_anchors, img_shapes,
-                                           scale_factors, cfg, rescale)
+                                           scale_factors, cfg, rescale, gt_bboxes, gt_labels)
         else:
             result_list = self._get_bboxes(mlvl_cls_scores, mlvl_bbox_preds,
                                            mlvl_anchors, img_shapes,
                                            scale_factors, cfg, rescale,
-                                           with_nms)
+                                           with_nms, gt_bboxes, gt_labels)
         return result_list
 
     def _get_bboxes(self,

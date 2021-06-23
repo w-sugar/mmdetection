@@ -10,6 +10,7 @@ from mmcv.ops import batched_nms
 from ..builder import HEADS
 from .anchor_head import AnchorHead
 from .rpn_test_mixin import RPNTestMixin
+from mmdet.core.bbox import bbox_overlaps
 
 
 @HEADS.register_module()
@@ -84,7 +85,9 @@ class RPNHead(RPNTestMixin, AnchorHead):
                     img_shapes,
                     scale_factors,
                     cfg,
-                    rescale=False):
+                    rescale=False,
+                    gt_bboxes=None, 
+                    gt_labels=None):
         """Transform outputs for a single batch item into bbox predictions.
 
         Args:
@@ -228,23 +231,121 @@ class RPNHead(RPNTestMixin, AnchorHead):
             return dets
 
         result_list = []
-        for (mlvl_proposals, mlvl_scores,
-             mlvl_ids) in zip(batch_mlvl_proposals, batch_mlvl_scores,
-                              batch_mlvl_ids):
-            # Skip nonzero op while exporting to ONNX
-            if cfg.min_bbox_size >= 0 and (not torch.onnx.is_in_onnx_export()):
-                w = mlvl_proposals[:, 2] - mlvl_proposals[:, 0]
-                h = mlvl_proposals[:, 3] - mlvl_proposals[:, 1]
-                valid_ind = torch.nonzero(
-                    (w > cfg.min_bbox_size)
-                    & (h > cfg.min_bbox_size),
-                    as_tuple=False).squeeze()
-                if valid_ind.sum().item() != len(mlvl_proposals):
-                    mlvl_proposals = mlvl_proposals[valid_ind, :]
-                    mlvl_scores = mlvl_scores[valid_ind]
-                    mlvl_ids = mlvl_ids[valid_ind]
+        result_list_tail = []
+        gt_bboxes = None
+        gt_labels = None
+        if gt_bboxes is None or gt_labels is None:
+            for (mlvl_proposals, mlvl_scores,
+                 mlvl_ids) in zip(batch_mlvl_proposals, batch_mlvl_scores,
+                                 batch_mlvl_ids):
+                # Skip nonzero op while exporting to ONNX
+                if cfg.min_bbox_size >= 0 and (not torch.onnx.is_in_onnx_export()):
+                    w = mlvl_proposals[:, 2] - mlvl_proposals[:, 0]
+                    h = mlvl_proposals[:, 3] - mlvl_proposals[:, 1]
+                    valid_ind = torch.nonzero(
+                        (w > cfg.min_bbox_size)
+                        & (h > cfg.min_bbox_size),
+                        as_tuple=False).squeeze()
+                    if valid_ind.sum().item() != len(mlvl_proposals):
+                        mlvl_proposals = mlvl_proposals[valid_ind, :]
+                        mlvl_scores = mlvl_scores[valid_ind]
+                        mlvl_ids = mlvl_ids[valid_ind]
 
-            dets, keep = batched_nms(mlvl_proposals, mlvl_scores, mlvl_ids,
-                                     cfg.nms)
-            result_list.append(dets[:cfg.max_per_img])
-        return result_list
+                dets, keep = batched_nms(mlvl_proposals, mlvl_scores, mlvl_ids,
+                                         cfg.nms)
+                result_list.append(dets[:cfg.max_per_img])
+            return result_list
+        else:
+            for (mlvl_proposals, mlvl_scores,
+                mlvl_ids, gt_bboxes_pre, gt_labels_pre) in zip(batch_mlvl_proposals, batch_mlvl_scores,
+                                batch_mlvl_ids, gt_bboxes, gt_labels):
+                # Skip nonzero op while exporting to ONNX
+                if cfg.min_bbox_size >= 0 and (not torch.onnx.is_in_onnx_export()):
+                    w = mlvl_proposals[:, 2] - mlvl_proposals[:, 0]
+                    h = mlvl_proposals[:, 3] - mlvl_proposals[:, 1]
+                    valid_ind = torch.nonzero(
+                        (w > cfg.min_bbox_size)
+                        & (h > cfg.min_bbox_size),
+                        as_tuple=False).squeeze()
+                    if valid_ind.sum().item() != len(mlvl_proposals):
+                        mlvl_proposals = mlvl_proposals[valid_ind, :]
+                        mlvl_scores = mlvl_scores[valid_ind]
+                        mlvl_ids = mlvl_ids[valid_ind]
+
+                dets = self.nms_resampling_discrete(mlvl_proposals, mlvl_scores, mlvl_ids, gt_bboxes_pre, gt_labels_pre, 0.9, 0.8, 0.7)
+                scores = dets[:, 4]
+                num = min(cfg.max_per_img, dets.shape[0])
+                _, topk_inds = scores.topk(num)
+                proposals = dets[topk_inds, :]
+                # result_list.append(proposals)
+                result_list_tail.append(proposals)
+                dets, keep = batched_nms(mlvl_proposals, mlvl_scores, mlvl_ids,
+                                         cfg.nms)
+                result_list.append(dets[:cfg.max_per_img])
+                # dets, keep = batched_nms(mlvl_proposals, mlvl_scores, mlvl_ids,
+                #                          dict(type='nms', iou_threshold=0.9))
+                # result_list_tail.append(dets[:cfg.max_per_img])
+            return result_list, result_list_tail
+
+    def nms_resampling_discrete(self, proposals, scores, ids, gt_bboxes, gt_labels, a_r, a_c, a_f):
+        # proposal is considered as background when its iou with gt < 0.3
+        select_thresh = 0.3
+        out= []
+
+        # rare, common, frequent = self.get_category_frequency(gt_labels.device)
+        frequent = torch.tensor([0, 3], device=gt_labels.device)
+        common = torch.tensor([1, 4, 9], device=gt_labels.device)
+        rare = torch.tensor([2, 5, 6, 7, 8, 10], device=gt_labels.device)
+
+        rare_gtbox = torch.zeros((2000, 4), device=gt_labels.device)
+        rare_gtbox_idx = 0
+        common_gtbox = torch.zeros((2000, 4), device=gt_labels.device)
+        common_gtbox_idx = 0
+        frequent_gtbox = torch.zeros((2000, 4), device=gt_labels.device)
+        frequent_gtbox_idx = 0
+        for gt_bbox, gt_label in zip(gt_bboxes, gt_labels):
+            if gt_label in rare:
+                rare_gtbox[rare_gtbox_idx, ...] = gt_bbox
+                rare_gtbox_idx += 1
+            elif gt_label in common:
+                common_gtbox[common_gtbox_idx, ...] = gt_bbox
+                common_gtbox_idx += 1
+            else:
+                frequent_gtbox[frequent_gtbox_idx, ...] = gt_bbox
+                frequent_gtbox_idx += 1
+        rare_gtbox = rare_gtbox[:rare_gtbox_idx, ...]
+        common_gtbox = common_gtbox[:common_gtbox_idx, ...]
+
+        frequent_proposals, _ = batched_nms(proposals, scores, ids, dict(type='nms', iou_threshold=a_f))
+        if len(rare_gtbox) > 0:
+            rare_proposals, _ = batched_nms(proposals, scores, ids, dict(type='nms', iou_threshold=a_r))
+            rare_overlaps = bbox_overlaps(rare_gtbox, rare_proposals[:, :4])
+            rare_max_overlaps, rare_argmax_overlaps = rare_overlaps.max(dim=0)
+            rare_pos_inds = rare_max_overlaps >= select_thresh
+            rare_proposals = rare_proposals[rare_pos_inds, :]
+            out.append(rare_proposals)
+
+            frequent_rare_overlaps = bbox_overlaps(rare_gtbox, frequent_proposals[:, :4])
+            frequent_rare_max_overlaps, frequent_rare_argmax_overlaps = frequent_rare_overlaps.max(dim=0)
+            valid_inds = frequent_rare_max_overlaps < select_thresh
+            frequent_proposals = frequent_proposals[valid_inds, :]
+        if len(common_gtbox) > 0:
+            # keep = self.nms_py(proposals, scores, a_c)
+            common_proposals, _ = batched_nms(proposals, scores, ids, dict(type='nms', iou_threshold=a_c))
+            common_overlaps = bbox_overlaps(common_gtbox, common_proposals[:, :4])
+            common_max_overlaps, common_argmax_overlaps = common_overlaps.max(dim=0)
+            common_pos_inds = common_max_overlaps >= select_thresh
+            common_proposals = common_proposals[common_pos_inds, :]
+            out.append(common_proposals)
+
+            frequent_common_overlaps = bbox_overlaps(common_gtbox, frequent_proposals[:, :4])
+            frequent_common_max_overlaps, frequent_common_argmax_overlaps = frequent_common_overlaps.max(dim=0)
+            valid_inds = frequent_common_max_overlaps < select_thresh
+            frequent_proposals = frequent_proposals[valid_inds, :]
+        out.append(frequent_proposals)
+        if len(out) > 1:
+            out_proposals = torch.cat(out, 0)
+        else:
+            out_proposals = frequent_proposals
+
+        return out_proposals

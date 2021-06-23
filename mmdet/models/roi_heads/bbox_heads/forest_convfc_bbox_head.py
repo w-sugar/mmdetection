@@ -3,11 +3,12 @@ import torch
 from mmcv.cnn import ConvModule
 
 from mmdet.models.builder import HEADS
-from .bbox_head import BBoxHead
+# from .bbox_head import BBoxHead
+from .forest_bbox_head import ForestBBoxHead
 
 
 @HEADS.register_module()
-class ConvFCBBoxHead(BBoxHead):
+class ForestConvFCBBoxHead(ForestBBoxHead):
     r"""More general bbox head, with shared conv and fc layers and two optional
     separated branches.
 
@@ -32,7 +33,7 @@ class ConvFCBBoxHead(BBoxHead):
                  init_cfg=None,
                  *args,
                  **kwargs):
-        super(ConvFCBBoxHead, self).__init__(
+        super(ForestConvFCBBoxHead, self).__init__(
             *args, init_cfg=init_cfg, **kwargs)
         assert (num_shared_convs + num_shared_fcs + num_cls_convs +
                 num_cls_fcs + num_reg_convs + num_reg_fcs > 0)
@@ -88,9 +89,11 @@ class ConvFCBBoxHead(BBoxHead):
         # reconstruct fc_cls and fc_reg since input channels are changed
         if self.with_cls:
             # self.fc_cls = nn.Linear(self.cls_last_dim+256, self.num_classes + 1)
+            self.fc_cls_layer = nn.Linear(self.cls_last_dim, self.cls_last_dim)
             self.fc_cls = nn.Linear(self.cls_last_dim, self.num_classes + 1)
-            self.fc_cls_root_share = nn.Linear(self.cls_last_dim, self.cls_last_dim)
-            self.fc_cls_root = nn.Linear(self.cls_last_dim, 6)
+            self.fc_cls_root_layer = nn.Linear(self.cls_last_dim, self.cls_last_dim)
+            self.fc_cls_root = nn.Linear(self.cls_last_dim, 5)
+            
         if self.with_reg:
             out_dim_reg = (4 if self.reg_class_agnostic else 4 *
                            self.num_classes)
@@ -164,66 +167,30 @@ class ConvFCBBoxHead(BBoxHead):
 
             x = x.flatten(1)
 
-            for fc in self.shared_fcs:
-                x = self.relu(fc(x))
+            x = self.relu(self.shared_fcs[0](x))
+            x_cls = x
+            x_reg = x
+            x_reg = self.relu(self.shared_fcs[1](x_reg))
             # mask_x = mask_x.flatten(1)
             # for fc in self.branch_fcs_mask:
             #     mask_x = self.relu(fc(mask_x))
-        # separate branches
-        x_cls = x
-        x_reg = x
-        x_cls_root = self.relu(self.fc_cls_root_share(x))
-        # 1024 * 1024/256
-        # x_cls = torch.cat([x, mask_x], 1)
-        # x_reg = torch.cat([x, mask_x], 1)
 
-        for conv in self.cls_convs:
-            x_cls = conv(x_cls)
-        if x_cls.dim() > 2:
-            if self.with_avg_pool:
-                x_cls = self.avg_pool(x_cls)
-            x_cls = x_cls.flatten(1)
-        for fc in self.cls_fcs:
-            x_cls = self.relu(fc(x_cls))
+        x_cls_all = self.relu(self.fc_cls_layer(x_cls))
+        x_cls_root = self.relu(self.fc_cls_root_layer(x_cls))
 
-        for conv in self.reg_convs:
-            x_reg = conv(x_reg)
-        if x_reg.dim() > 2:
-            if self.with_avg_pool:
-                x_reg = self.avg_pool(x_reg)
-            x_reg = x_reg.flatten(1)
-        for fc in self.reg_fcs:
-            x_reg = self.relu(fc(x_reg))
-
-        cls_score = self.fc_cls(x_cls) if self.with_cls else None
+        cls_score = self.fc_cls(x_cls_all) if self.with_cls else None
         cls_score_root = self.fc_cls_root(x_cls_root) if self.with_cls else None
         bbox_pred = self.fc_reg(x_reg) if self.with_reg else None
         return cls_score, cls_score_root, bbox_pred
 
 
 @HEADS.register_module()
-class Shared2FCBBoxHead(ConvFCBBoxHead):
+class ForestShared2FCBBoxHead(ForestConvFCBBoxHead):
 
     def __init__(self, fc_out_channels=1024, *args, **kwargs):
-        super(Shared2FCBBoxHead, self).__init__(
+        super(ForestShared2FCBBoxHead, self).__init__(
             num_shared_convs=0,
             num_shared_fcs=2,
-            num_cls_convs=0,
-            num_cls_fcs=0,
-            num_reg_convs=0,
-            num_reg_fcs=0,
-            fc_out_channels=fc_out_channels,
-            *args,
-            **kwargs)
-
-
-@HEADS.register_module()
-class Shared4Conv1FCBBoxHead(ConvFCBBoxHead):
-
-    def __init__(self, fc_out_channels=1024, *args, **kwargs):
-        super(Shared4Conv1FCBBoxHead, self).__init__(
-            num_shared_convs=4,
-            num_shared_fcs=1,
             num_cls_convs=0,
             num_cls_fcs=0,
             num_reg_convs=0,

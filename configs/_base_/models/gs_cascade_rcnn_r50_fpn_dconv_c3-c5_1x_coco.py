@@ -13,10 +13,11 @@ model = dict(
         dcn=dict(type='DCN', deform_groups=1, fallback_on_stride=False),
         stage_with_dcn=(False, True, True, True)),
     neck=dict(
-            type='FPN',
-            in_channels=[256, 512, 1024, 2048],
-            out_channels=256,
-            num_outs=5),
+        type='FPN',
+        in_channels=[256, 512, 1024, 2048],
+        out_channels=256,
+        num_outs=5,
+        with_ExtraMask=[256,5,True,True]),
     rpn_head=dict(
         type='RPNHead',
         in_channels=256,
@@ -36,11 +37,7 @@ model = dict(
         loss_bbox=dict(
             type='SmoothL1Loss', beta=0.1111111111111111, loss_weight=1.0)),
     roi_head=dict(
-        type='TailCascadeRoIHead',
-        # labels_tail=[2, 5, 6, 7, 8, 10],
-        # labels=[0, 1, 3, 4, 9],
-        labels_tail=[2, 4, 5, 6, 7, 8, 9, 10],
-        labels=[0, 1, 3],
+        type='GSCascadeRoIHead',
         num_stages=3,
         stage_loss_weights=[1, 0.5, 0.25],
         bbox_roi_extractor=dict(
@@ -50,7 +47,15 @@ model = dict(
             featmap_strides=[4, 8, 16, 32]),
         bbox_head=[
             dict(
-                type='Shared2FCBBoxHead',
+                type='GSBBoxHeadWithV2',
+                gs_config=dict(
+                    loss_bg=dict(
+                        type='CrossEntropyLoss', use_sigmoid=False, loss_weight=1.0
+                    ),
+                    loss_bin=dict(
+                        type='CrossEntropyLoss', use_sigmoid=False, loss_weight=1.0
+                    ),
+                ),
                 in_channels=256,
                 fc_out_channels=1024,
                 roi_feat_size=7,
@@ -67,7 +72,15 @@ model = dict(
                 loss_bbox=dict(type='SmoothL1Loss', beta=1.0,
                                loss_weight=1.0)),
             dict(
-                type='Shared2FCBBoxHead',
+                type='GSBBoxHeadWithV2',
+                gs_config=dict(
+                    loss_bg=dict(
+                        type='CrossEntropyLoss', use_sigmoid=False, loss_weight=1.0
+                    ),
+                    loss_bin=dict(
+                        type='CrossEntropyLoss', use_sigmoid=False, loss_weight=1.0
+                    ),
+                ),
                 in_channels=256,
                 fc_out_channels=1024,
                 roi_feat_size=7,
@@ -84,7 +97,15 @@ model = dict(
                 loss_bbox=dict(type='SmoothL1Loss', beta=1.0,
                                loss_weight=1.0)),
             dict(
-                type='Shared2FCBBoxHead',
+                type='GSBBoxHeadWithV2',
+                gs_config=dict(
+                    loss_bg=dict(
+                        type='CrossEntropyLoss', use_sigmoid=False, loss_weight=1.0
+                    ),
+                    loss_bin=dict(
+                        type='CrossEntropyLoss', use_sigmoid=False, loss_weight=1.0
+                    ),
+                ),
                 in_channels=256,
                 fc_out_channels=1024,
                 roi_feat_size=7,
@@ -99,60 +120,7 @@ model = dict(
                     use_sigmoid=False,
                     loss_weight=1.0),
                 loss_bbox=dict(type='SmoothL1Loss', beta=1.0, loss_weight=1.0))
-        ],
-        bbox_head_tail=[
-            dict(
-                type='Shared2FCBBoxHead',
-                in_channels=256,
-                fc_out_channels=1024,
-                roi_feat_size=7,
-                num_classes=11,
-                bbox_coder=dict(
-                    type='DeltaXYWHBBoxCoder',
-                    target_means=[0.0, 0.0, 0.0, 0.0],
-                    target_stds=[0.1, 0.1, 0.2, 0.2]),
-                reg_class_agnostic=True,
-                loss_cls=dict(
-                    type='CrossEntropyLoss',
-                    use_sigmoid=False,
-                    loss_weight=2.0),
-                loss_bbox=dict(type='SmoothL1Loss', beta=1.0,
-                               loss_weight=2.0)),
-            dict(
-                type='Shared2FCBBoxHead',
-                in_channels=256,
-                fc_out_channels=1024,
-                roi_feat_size=7,
-                num_classes=11,
-                bbox_coder=dict(
-                    type='DeltaXYWHBBoxCoder',
-                    target_means=[0.0, 0.0, 0.0, 0.0],
-                    target_stds=[0.05, 0.05, 0.1, 0.1]),
-                reg_class_agnostic=True,
-                loss_cls=dict(
-                    type='CrossEntropyLoss',
-                    use_sigmoid=False,
-                    loss_weight=2.0),
-                loss_bbox=dict(type='SmoothL1Loss', beta=1.0,
-                               loss_weight=2.0)),
-            dict(
-                type='Shared2FCBBoxHead',
-                in_channels=256,
-                fc_out_channels=1024,
-                roi_feat_size=7,
-                num_classes=11,
-                bbox_coder=dict(
-                    type='DeltaXYWHBBoxCoder',
-                    target_means=[0.0, 0.0, 0.0, 0.0],
-                    target_stds=[0.033, 0.033, 0.067, 0.067]),
-                reg_class_agnostic=True,
-                loss_cls=dict(
-                    type='CrossEntropyLoss',
-                    use_sigmoid=False,
-                    loss_weight=2.0),
-                loss_bbox=dict(type='SmoothL1Loss', beta=1.0, loss_weight=2.0))
-        ]
-        ),
+        ]),
     train_cfg=dict(
         rpn=dict(
             assigner=dict(
@@ -173,106 +141,241 @@ model = dict(
             debug=False),
         rpn_proposal=dict(
             nms_pre=2000,
-            max_per_img=3000, #2000,
+            max_per_img=2000,
             nms=dict(type='nms', iou_threshold=0.7),
             min_bbox_size=0),
         rcnn=[
             dict(
-                assigner=dict(
+                assigner_bg=dict(
                     type='MaxIoUAssigner',
                     pos_iou_thr=0.5,
                     neg_iou_thr=0.5,
                     min_pos_iou=0.5,
                     match_low_quality=False,
                     ignore_iof_thr=-1),
-                sampler=dict(
+                sampler_bg=dict(
                     type='ClassBalancedPosSampler',
                     num=512,
                     pos_fraction=0.25,
                     neg_pos_ub=-1,
-                    # labels=[0, 1, 3, 4, 9],
-                    labels=[0, 1, 3],
+                    labels=None,
+                    # labels=[0, 1, 3],
                     add_gt_as_proposals=True),
-                assigner_tail=dict(
+                assigner_human=dict(
                     type='MaxIoUAssigner',
                     pos_iou_thr=0.5,
                     neg_iou_thr=0.5,
                     min_pos_iou=0.5,
                     match_low_quality=False,
                     ignore_iof_thr=-1),
-                sampler_tail=dict(
+                sampler_human=dict(
                     type='ClassBalancedPosSampler',
                     num=512,
                     pos_fraction=0.25,
                     neg_pos_ub=-1,
-                    # labels=[2, 5, 6, 7, 8, 10],
-                    labels=[2, 4, 5, 6, 7, 8, 9, 10],
+                    labels=[0, 1],
+                    # labels=[2, 4, 5, 6, 7, 8, 9, 10],
+                    add_gt_as_proposals=True),
+                assigner_vehicle=dict(
+                    type='MaxIoUAssigner',
+                    pos_iou_thr=0.5,
+                    neg_iou_thr=0.5,
+                    min_pos_iou=0.5,
+                    match_low_quality=False,
+                    ignore_iof_thr=-1),
+                sampler_vehicle=dict(
+                    type='ClassBalancedPosSampler',
+                    num=512,
+                    pos_fraction=0.25,
+                    neg_pos_ub=-1,
+                    labels=[3, 4, 5, 8],
+                    # labels=[2, 4, 5, 6, 7, 8, 9, 10],
+                    add_gt_as_proposals=True),
+                assigner_two=dict(
+                    type='MaxIoUAssigner',
+                    pos_iou_thr=0.5,
+                    neg_iou_thr=0.5,
+                    min_pos_iou=0.5,
+                    match_low_quality=False,
+                    ignore_iof_thr=-1),
+                sampler_two=dict(
+                    type='ClassBalancedPosSampler',
+                    num=512,
+                    pos_fraction=0.25,
+                    neg_pos_ub=-1,
+                    labels=[2, 9],
+                    # labels=[2, 4, 5, 6, 7, 8, 9, 10],
+                    add_gt_as_proposals=True),
+                assigner_three=dict(
+                    type='MaxIoUAssigner',
+                    pos_iou_thr=0.5,
+                    neg_iou_thr=0.5,
+                    min_pos_iou=0.5,
+                    match_low_quality=False,
+                    ignore_iof_thr=-1),
+                sampler_three=dict(
+                    type='ClassBalancedPosSampler',
+                    num=512,
+                    pos_fraction=0.25,
+                    neg_pos_ub=-1,
+                    labels=[6, 7],
+                    # labels=[2, 4, 5, 6, 7, 8, 9, 10],
                     add_gt_as_proposals=True),
                 pos_weight=-1,
                 debug=False),
             dict(
-                assigner=dict(
+                assigner_bg=dict(
                     type='MaxIoUAssigner',
                     pos_iou_thr=0.6,
                     neg_iou_thr=0.6,
                     min_pos_iou=0.6,
                     match_low_quality=False,
                     ignore_iof_thr=-1),
-                sampler=dict(
+                sampler_bg=dict(
                     type='ClassBalancedPosSampler',
                     num=512,
                     pos_fraction=0.25,
                     neg_pos_ub=-1,
-                    # labels=[0, 1, 3, 4, 9],
-                    labels=[0, 1, 3],
+                    labels=None,
+                    # labels=[0, 1, 3],
                     add_gt_as_proposals=True),
-                assigner_tail=dict(
+                assigner_human=dict(
                     type='MaxIoUAssigner',
                     pos_iou_thr=0.6,
                     neg_iou_thr=0.6,
                     min_pos_iou=0.6,
                     match_low_quality=False,
                     ignore_iof_thr=-1),
-                sampler_tail=dict(
+                sampler_human=dict(
                     type='ClassBalancedPosSampler',
                     num=512,
                     pos_fraction=0.25,
                     neg_pos_ub=-1,
-                    # labels=[2, 5, 6, 7, 8, 10],
-                    labels=[2, 4, 5, 6, 7, 8, 9, 10],
+                    labels=[0, 1],
+                    # labels=[2, 4, 5, 6, 7, 8, 9, 10],
+                    add_gt_as_proposals=True),
+                assigner_vehicle=dict(
+                    type='MaxIoUAssigner',
+                    pos_iou_thr=0.6,
+                    neg_iou_thr=0.6,
+                    min_pos_iou=0.6,
+                    match_low_quality=False,
+                    ignore_iof_thr=-1),
+                sampler_vehicle=dict(
+                    type='ClassBalancedPosSampler',
+                    num=512,
+                    pos_fraction=0.25,
+                    neg_pos_ub=-1,
+                    labels=[3, 4, 5, 8],
+                    # labels=[2, 4, 5, 6, 7, 8, 9, 10],
+                    add_gt_as_proposals=True),
+                assigner_two=dict(
+                    type='MaxIoUAssigner',
+                    pos_iou_thr=0.6,
+                    neg_iou_thr=0.6,
+                    min_pos_iou=0.6,
+                    match_low_quality=False,
+                    ignore_iof_thr=-1),
+                sampler_two=dict(
+                    type='ClassBalancedPosSampler',
+                    num=512,
+                    pos_fraction=0.25,
+                    neg_pos_ub=-1,
+                    labels=[2, 9],
+                    # labels=[2, 4, 5, 6, 7, 8, 9, 10],
+                    add_gt_as_proposals=True),
+                assigner_three=dict(
+                    type='MaxIoUAssigner',
+                    pos_iou_thr=0.6,
+                    neg_iou_thr=0.6,
+                    min_pos_iou=0.6,
+                    match_low_quality=False,
+                    ignore_iof_thr=-1),
+                sampler_three=dict(
+                    type='ClassBalancedPosSampler',
+                    num=512,
+                    pos_fraction=0.25,
+                    neg_pos_ub=-1,
+                    labels=[6, 7],
+                    # labels=[2, 4, 5, 6, 7, 8, 9, 10],
                     add_gt_as_proposals=True),
                 pos_weight=-1,
                 debug=False),
             dict(
-                assigner=dict(
+                assigner_bg=dict(
                     type='MaxIoUAssigner',
                     pos_iou_thr=0.7,
                     neg_iou_thr=0.7,
                     min_pos_iou=0.7,
                     match_low_quality=False,
                     ignore_iof_thr=-1),
-                sampler=dict(
+                sampler_bg=dict(
                     type='ClassBalancedPosSampler',
                     num=512,
                     pos_fraction=0.25,
                     neg_pos_ub=-1,
-                    # labels=[0, 1, 3, 4, 9],
-                    labels=[0, 1, 3],
+                    labels=None,
+                    # labels=[0, 1, 3],
                     add_gt_as_proposals=True),
-                assigner_tail=dict(
+                assigner_human=dict(
                     type='MaxIoUAssigner',
                     pos_iou_thr=0.7,
                     neg_iou_thr=0.7,
                     min_pos_iou=0.7,
                     match_low_quality=False,
                     ignore_iof_thr=-1),
-                sampler_tail=dict(
+                sampler_human=dict(
                     type='ClassBalancedPosSampler',
                     num=512,
                     pos_fraction=0.25,
                     neg_pos_ub=-1,
-                    # labels=[2, 5, 6, 7, 8, 10],
-                    labels=[2, 4, 5, 6, 7, 8, 9, 10],
+                    labels=[0, 1],
+                    # labels=[2, 4, 5, 6, 7, 8, 9, 10],
+                    add_gt_as_proposals=True),
+                assigner_vehicle=dict(
+                    type='MaxIoUAssigner',
+                    pos_iou_thr=0.7,
+                    neg_iou_thr=0.7,
+                    min_pos_iou=0.7,
+                    match_low_quality=False,
+                    ignore_iof_thr=-1),
+                sampler_vehicle=dict(
+                    type='ClassBalancedPosSampler',
+                    num=512,
+                    pos_fraction=0.25,
+                    neg_pos_ub=-1,
+                    labels=[3, 4, 5, 8],
+                    # labels=[2, 4, 5, 6, 7, 8, 9, 10],
+                    add_gt_as_proposals=True),
+                assigner_two=dict(
+                    type='MaxIoUAssigner',
+                    pos_iou_thr=0.7,
+                    neg_iou_thr=0.7,
+                    min_pos_iou=0.7,
+                    match_low_quality=False,
+                    ignore_iof_thr=-1),
+                sampler_two=dict(
+                    type='ClassBalancedPosSampler',
+                    num=512,
+                    pos_fraction=0.25,
+                    neg_pos_ub=-1,
+                    labels=[2, 9],
+                    # labels=[2, 4, 5, 6, 7, 8, 9, 10],
+                    add_gt_as_proposals=True),
+                assigner_three=dict(
+                    type='MaxIoUAssigner',
+                    pos_iou_thr=0.7,
+                    neg_iou_thr=0.7,
+                    min_pos_iou=0.7,
+                    match_low_quality=False,
+                    ignore_iof_thr=-1),
+                sampler_three=dict(
+                    type='ClassBalancedPosSampler',
+                    num=512,
+                    pos_fraction=0.25,
+                    neg_pos_ub=-1,
+                    labels=[6, 7],
+                    # labels=[2, 4, 5, 6, 7, 8, 9, 10],
                     add_gt_as_proposals=True),
                 pos_weight=-1,
                 debug=False)
@@ -284,7 +387,7 @@ model = dict(
             nms=dict(type='nms', iou_threshold=0.7),
             min_bbox_size=0),
         rcnn=dict(
-            score_thr=0.05,
+            score_thr=0.00,
             nms=dict(type='nms', iou_threshold=0.5),
             max_per_img=500)))
 dataset_type = 'VisDroneDataset'
@@ -314,7 +417,8 @@ test_pipeline = [
     dict(type='LoadImageFromFile'),
     dict(
         type='MultiScaleFlipAug',
-        img_scale=[(1333, 800), (1333*1.5, 800*1.5), (1333 * 2, 800 * 2), (1333*2.5, 800 *2.5), (1333*3, 800*3)],
+        img_scale=[(1333, 800), (1999.5, 1200.0), (2666, 1600),
+                   (3332.5, 2000.0), (3999, 2400)],
         # img_scale=(1333, 800),
         flip=False,
         transforms=[
@@ -331,7 +435,7 @@ test_pipeline = [
         ])
 ]
 data = dict(
-    samples_per_gpu=2,
+    samples_per_gpu=4,
     workers_per_gpu=2,
     train=dict(
         type='VisDroneDataset',
@@ -365,6 +469,8 @@ data = dict(
             dict(type='LoadImageFromFile'),
             dict(
                 type='MultiScaleFlipAug',
+                # img_scale=[(1333, 800), (1999.5, 1200.0), (2666, 1600),
+                #            (3332.5, 2000.0), (3999, 2400)],
                 img_scale=(1333, 800),
                 flip=False,
                 transforms=[
@@ -390,7 +496,8 @@ data = dict(
             dict(type='LoadImageFromFile'),
             dict(
                 type='MultiScaleFlipAug',
-                img_scale=[(1333, 800), (1333*1.5, 800*1.5), (1333 * 2, 800 * 2), (1333*2.5, 800 *2.5), (1333*3, 800*3)],
+                img_scale=[(1333, 800), (1999.5, 1200.0), (2666, 1600),
+                           (3332.5, 2000.0), (3999, 2400)],
                 # img_scale=(1333, 800),
                 flip=False,
                 transforms=[
@@ -409,7 +516,7 @@ data = dict(
                 ])
         ]))
 evaluation = dict(interval=1, metric='bbox')
-optimizer = dict(type='SGD', lr=0.01, momentum=0.9, weight_decay=0.0001)
+optimizer = dict(type='SGD', lr=0.02, momentum=0.9, weight_decay=0.0001)
 optimizer_config = dict(grad_clip=None)
 lr_config = dict(
     policy='step',
@@ -426,5 +533,5 @@ log_level = 'INFO'
 load_from = '/home/sugar/workspace/mmdetection/checkpoints/cascade_rcnn_r50_fpn_dconv_c3-c5_1x_coco_20200130-2f1fca44.pth'
 resume_from = None
 workflow = [('train', 1)]
-work_dir = './work_dirs/cascade_rcnn_r50_fpn_1x_coco_cut_four_dcn_multiscale_bfp_wordtree/'
-gpu_ids = range(0, 2)
+work_dir = '/data/sugar/checkpoints/mmdetection_work_dirs/cascade_rcnn_r50_fpn_1x_coco_cut_four_dcn_multiscale_mask/'
+gpu_ids = range(0, 8)

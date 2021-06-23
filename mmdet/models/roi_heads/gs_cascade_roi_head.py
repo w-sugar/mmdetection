@@ -8,122 +8,40 @@ from mmdet.core import (bbox2result, bbox2roi, bbox_mapping, build_assigner,
 from ..builder import HEADS, build_head, build_roi_extractor
 from .base_roi_head import BaseRoIHead
 from .test_mixins import BBoxTestMixin, MaskTestMixin
+from .cascade_roi_head import CascadeRoIHead
 
 
 @HEADS.register_module()
-class ForestCascadeRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
+class GSCascadeRoIHead(CascadeRoIHead):
     """Cascade roi head including one bbox head and one mask head.
-
     https://arxiv.org/abs/1712.00726
     """
 
-    def __init__(self,
-                 num_stages,
-                 stage_loss_weights,
-                 bbox_roi_extractor=None,
-                 bbox_head=None,
-                 mask_roi_extractor=None,
-                 mask_head=None,
-                 shared_head=None,
-                 train_cfg=None,
-                 test_cfg=None,
-                 pretrained=None,
-                 init_cfg=None):
-        assert bbox_roi_extractor is not None
-        assert bbox_head is not None
-        assert shared_head is None, \
-            'Shared head is not supported in Cascade RCNN anymore'
-
-        self.num_stages = num_stages
-        self.stage_loss_weights = stage_loss_weights
-        super(ForestCascadeRoIHead, self).__init__(
-            bbox_roi_extractor=bbox_roi_extractor,
-            bbox_head=bbox_head,
-            mask_roi_extractor=mask_roi_extractor,
-            mask_head=mask_head,
-            shared_head=shared_head,
-            train_cfg=train_cfg,
-            test_cfg=test_cfg,
-            pretrained=pretrained,
-            init_cfg=init_cfg)
-
-    def init_bbox_head(self, bbox_roi_extractor, bbox_head):
-        """Initialize box head and box roi extractor.
-
-        Args:
-            bbox_roi_extractor (dict): Config of box roi extractor.
-            bbox_head (dict): Config of box in box head.
-        """
-        self.bbox_roi_extractor = ModuleList()
-        self.bbox_head = ModuleList()
-        if not isinstance(bbox_roi_extractor, list):
-            bbox_roi_extractor = [
-                bbox_roi_extractor for _ in range(self.num_stages)
-            ]
-        if not isinstance(bbox_head, list):
-            bbox_head = [bbox_head for _ in range(self.num_stages)]
-        assert len(bbox_roi_extractor) == len(bbox_head) == self.num_stages
-        for roi_extractor, head in zip(bbox_roi_extractor, bbox_head):
-            self.bbox_roi_extractor.append(build_roi_extractor(roi_extractor))
-            self.bbox_head.append(build_head(head))
-
-    def init_mask_head(self, mask_roi_extractor, mask_head):
-        """Initialize mask head and mask roi extractor.
-
-        Args:
-            mask_roi_extractor (dict): Config of mask roi extractor.
-            mask_head (dict): Config of mask in mask head.
-        """
-        self.mask_head = nn.ModuleList()
-        if not isinstance(mask_head, list):
-            mask_head = [mask_head for _ in range(self.num_stages)]
-        assert len(mask_head) == self.num_stages
-        for head in mask_head:
-            self.mask_head.append(build_head(head))
-        if mask_roi_extractor is not None:
-            self.share_roi_extractor = False
-            self.mask_roi_extractor = ModuleList()
-            if not isinstance(mask_roi_extractor, list):
-                mask_roi_extractor = [
-                    mask_roi_extractor for _ in range(self.num_stages)
-                ]
-            assert len(mask_roi_extractor) == self.num_stages
-            for roi_extractor in mask_roi_extractor:
-                self.mask_roi_extractor.append(
-                    build_roi_extractor(roi_extractor))
-        else:
-            self.share_roi_extractor = True
-            self.mask_roi_extractor = self.bbox_roi_extractor
-
     def init_assigner_sampler(self):
         """Initialize assigner and sampler for each stage."""
-        self.bbox_assigner = []
-        self.bbox_sampler = []
+        self.bbox_assigner_bg = []
+        self.bbox_sampler_bg = []
+        self.bbox_assigner_human = []
+        self.bbox_sampler_human = []
+        self.bbox_assigner_vehicle = []
+        self.bbox_sampler_vehicle = []
+        self.bbox_assigner_two = []
+        self.bbox_sampler_two = []
+        self.bbox_assigner_three = []
+        self.bbox_sampler_three = []
         if self.train_cfg is not None:
-            for idx, rcnn_train_cfg in enumerate(self.train_cfg):
-                self.bbox_assigner.append(
-                    build_assigner(rcnn_train_cfg.assigner))
-                self.current_stage = idx
-                self.bbox_sampler.append(
-                    build_sampler(rcnn_train_cfg.sampler, context=self))
+            for rcnn_train_cfg in self.train_cfg:
+                self.bbox_assigner_bg.append(build_assigner(rcnn_train_cfg.assigner_bg))
+                self.bbox_assigner_human.append(build_assigner(rcnn_train_cfg.assigner_human))
+                self.bbox_assigner_vehicle.append(build_assigner(rcnn_train_cfg.assigner_vehicle))
+                self.bbox_assigner_two.append(build_assigner(rcnn_train_cfg.assigner_two))
+                self.bbox_assigner_three.append(build_assigner(rcnn_train_cfg.assigner_three))
+                self.bbox_sampler_bg.append(build_sampler(rcnn_train_cfg.sampler_bg))
+                self.bbox_sampler_human.append(build_sampler(rcnn_train_cfg.sampler_human))
+                self.bbox_sampler_vehicle.append(build_sampler(rcnn_train_cfg.sampler_vehicle))
+                self.bbox_sampler_two.append(build_sampler(rcnn_train_cfg.sampler_two))
+                self.bbox_sampler_three.append(build_sampler(rcnn_train_cfg.sampler_three))
 
-    def forward_dummy(self, x, proposals):
-        """Dummy forward function."""
-        # bbox head
-        outs = ()
-        rois = bbox2roi([proposals])
-        if self.with_bbox:
-            for i in range(self.num_stages):
-                bbox_results = self._bbox_forward(i, x, rois)
-                outs = outs + (bbox_results['cls_score'],
-                               bbox_results['bbox_pred'])
-        # mask heads
-        if self.with_mask:
-            mask_rois = rois[:100]
-            for i in range(self.num_stages):
-                mask_results = self._mask_forward(i, x, mask_rois)
-                outs = outs + (mask_results['mask_pred'], )
-        return outs
 
     def _bbox_forward(self, stage, x, rois):
         """Box head forward function used in both training and testing."""
@@ -132,60 +50,66 @@ class ForestCascadeRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
         bbox_feats = bbox_roi_extractor(x[:bbox_roi_extractor.num_inputs],
                                         rois)
         # do not support caffe_c4 model anymore
-        cls_score, cls_score_root, bbox_pred = bbox_head(bbox_feats)
+        cls_score, bbox_pred = bbox_head(bbox_feats)
 
         bbox_results = dict(
-            cls_score=cls_score, cls_score_root=cls_score_root, bbox_pred=bbox_pred, bbox_feats=bbox_feats)
+            cls_score=cls_score, bbox_pred=bbox_pred, bbox_feats=bbox_feats)
         return bbox_results
 
-    def _bbox_forward_train(self, stage, x, sampling_results, gt_bboxes,
+    def _bbox_forward_train(self, stage, x, sampling_results_bg, sampling_results_human, sampling_results_vehicle, sampling_results_two, sampling_results_three, gt_bboxes,
                             gt_labels, rcnn_train_cfg):
         """Run forward function and calculate loss for box head in training."""
-        rois = bbox2roi([res.bboxes for res in sampling_results])
-        bbox_results = self._bbox_forward(stage, x, rois)
-        bbox_targets = self.bbox_head[stage].get_targets(
-            sampling_results, gt_bboxes, gt_labels, rcnn_train_cfg)
-        loss_bbox = self.bbox_head[stage].loss(bbox_results['cls_score'],
-                                               bbox_results['cls_score_root'],
-                                               bbox_results['bbox_pred'], rois,
-                                               *bbox_targets)
+        rois_bg = bbox2roi([res.bboxes for res in sampling_results_bg])
+        bbox_results_bg = self._bbox_forward(stage, x, rois_bg)
+        bbox_targets_bg = self.bbox_head[stage].get_targets(
+            sampling_results_bg, gt_bboxes, gt_labels, rcnn_train_cfg)
 
-        bbox_results.update(
-            loss_bbox=loss_bbox, rois=rois, bbox_targets=bbox_targets)
-        return bbox_results
+        rois_human = bbox2roi([res.bboxes for res in sampling_results_human])
+        bbox_results_human = self._bbox_forward(stage, x, rois_human)
+        bbox_targets_human = self.bbox_head[stage].get_targets(
+            sampling_results_human, gt_bboxes, gt_labels, rcnn_train_cfg)
 
-    def _mask_forward(self, stage, x, rois):
-        """Mask head forward function used in both training and testing."""
-        mask_roi_extractor = self.mask_roi_extractor[stage]
-        mask_head = self.mask_head[stage]
-        mask_feats = mask_roi_extractor(x[:mask_roi_extractor.num_inputs],
-                                        rois)
-        # do not support caffe_c4 model anymore
-        mask_pred = mask_head(mask_feats)
+        rois_vehicle = bbox2roi([res.bboxes for res in sampling_results_vehicle])
+        bbox_results_vehicle = self._bbox_forward(stage, x, rois_vehicle)
+        bbox_targets_vehicle = self.bbox_head[stage].get_targets(
+            sampling_results_vehicle, gt_bboxes, gt_labels, rcnn_train_cfg)
 
-        mask_results = dict(mask_pred=mask_pred)
-        return mask_results
+        rois_two = bbox2roi([res.bboxes for res in sampling_results_two])
+        bbox_results_two = self._bbox_forward(stage, x, rois_two)
+        bbox_targets_two = self.bbox_head[stage].get_targets(
+            sampling_results_two, gt_bboxes, gt_labels, rcnn_train_cfg)
 
-    def _mask_forward_train(self,
-                            stage,
-                            x,
-                            sampling_results,
-                            gt_masks,
-                            rcnn_train_cfg,
-                            bbox_feats=None):
-        """Run forward function and calculate loss for mask head in
-        training."""
-        pos_rois = bbox2roi([res.pos_bboxes for res in sampling_results])
-        mask_results = self._mask_forward(stage, x, pos_rois)
+        rois_three = bbox2roi([res.bboxes for res in sampling_results_three])
+        bbox_results_three = self._bbox_forward(stage, x, rois_three)
+        bbox_targets_three = self.bbox_head[stage].get_targets(
+            sampling_results_three, gt_bboxes, gt_labels, rcnn_train_cfg)
 
-        mask_targets = self.mask_head[stage].get_targets(
-            sampling_results, gt_masks, rcnn_train_cfg)
-        pos_labels = torch.cat([res.pos_gt_labels for res in sampling_results])
-        loss_mask = self.mask_head[stage].loss(mask_results['mask_pred'],
-                                               mask_targets, pos_labels)
+        loss_bbox_bg = self.bbox_head[stage].loss(1, bbox_results_bg['cls_score'],
+                                               bbox_results_bg['bbox_pred'], rois_bg,
+                                               *bbox_targets_bg)
+        bbox_results_bg.update(loss_bbox=loss_bbox_bg, rois=rois_bg, bbox_targets=bbox_targets_bg)
 
-        mask_results.update(loss_mask=loss_mask)
-        return mask_results
+        loss_bbox_human = self.bbox_head[stage].loss(2, bbox_results_human['cls_score'],
+                                               bbox_results_human['bbox_pred'], rois_human,
+                                               *bbox_targets_human)
+        bbox_results_human.update(loss_bbox=loss_bbox_human, rois=rois_human, bbox_targets=bbox_targets_human)
+
+        loss_bbox_vehicle = self.bbox_head[stage].loss(3, bbox_results_vehicle['cls_score'],
+                                               bbox_results_vehicle['bbox_pred'], rois_vehicle,
+                                               *bbox_targets_vehicle)
+        bbox_results_vehicle.update(loss_bbox=loss_bbox_vehicle, rois=rois_vehicle, bbox_targets=bbox_targets_vehicle)
+
+        loss_bbox_two = self.bbox_head[stage].loss(4, bbox_results_two['cls_score'],
+                                               bbox_results_two['bbox_pred'], rois_two,
+                                               *bbox_targets_two)
+        bbox_results_two.update(loss_bbox=loss_bbox_two, rois=rois_two, bbox_targets=bbox_targets_two)
+
+        loss_bbox_three = self.bbox_head[stage].loss(5, bbox_results_three['cls_score'],
+                                               bbox_results_three['bbox_pred'], rois_three,
+                                               *bbox_targets_three)
+        bbox_results_three.update(loss_bbox=loss_bbox_three, rois=rois_three, bbox_targets=bbox_targets_three)
+
+        return bbox_results_bg, bbox_results_human, bbox_results_vehicle, bbox_results_two, bbox_results_three
 
     def forward_train(self,
                       x,
@@ -211,68 +135,157 @@ class ForestCascadeRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
                 boxes can be ignored when computing the loss.
             gt_masks (None | Tensor) : true segmentation masks for each box
                 used if the architecture supports a segmentation task.
-
         Returns:
             dict[str, Tensor]: a dictionary of loss components
         """
         losses = dict()
+        # print(len(self.bbox_assigner))
+        proposal_list_human = proposal_list.copy()
+        proposal_list_vehicle = proposal_list.copy()
+        proposal_list_two = proposal_list.copy()
+        proposal_list_three = proposal_list.copy()
         for i in range(self.num_stages):
             self.current_stage = i
             rcnn_train_cfg = self.train_cfg[i]
             lw = self.stage_loss_weights[i]
 
             # assign gts and sample proposals
-            sampling_results = []
+            sampling_results_bg = []
+            sampling_results_human = []
+            sampling_results_vehicle = []
+            sampling_results_two = []
+            sampling_results_three = []
             if self.with_bbox or self.with_mask:
-                bbox_assigner = self.bbox_assigner[i]
-                bbox_sampler = self.bbox_sampler[i]
+                bbox_assigner_bg = self.bbox_assigner_bg[i]
+                bbox_assigner_human = self.bbox_assigner_human[i]
+                bbox_assigner_vehicle = self.bbox_assigner_vehicle[i]
+                bbox_assigner_two = self.bbox_assigner_two[i]
+                bbox_assigner_three = self.bbox_assigner_three[i]
+                bbox_sampler_bg = self.bbox_sampler_bg[i]
+                bbox_sampler_human = self.bbox_sampler_human[i]
+                bbox_sampler_vehicle = self.bbox_sampler_vehicle[i]
+                bbox_sampler_two = self.bbox_sampler_two[i]
+                bbox_sampler_three = self.bbox_sampler_three[i]
                 num_imgs = len(img_metas)
                 if gt_bboxes_ignore is None:
                     gt_bboxes_ignore = [None for _ in range(num_imgs)]
-
                 for j in range(num_imgs):
-                    assign_result = bbox_assigner.assign(
+                    assign_result_bg = bbox_assigner_bg.assign(
                         proposal_list[j], gt_bboxes[j], gt_bboxes_ignore[j],
                         gt_labels[j])
-                    sampling_result = bbox_sampler.sample(
-                        assign_result,
+                    sampling_result_bg = bbox_sampler_bg.sample(
+                        assign_result_bg,
                         proposal_list[j],
                         gt_bboxes[j],
                         gt_labels[j],
                         feats=[lvl_feat[j][None] for lvl_feat in x])
-                    sampling_results.append(sampling_result)
-
+                    sampling_results_bg.append(sampling_result_bg)
+                    assign_result_human = bbox_assigner_human.assign(
+                        proposal_list_human[j], gt_bboxes[j], gt_bboxes_ignore[j],
+                        gt_labels[j])
+                    sampling_result_human = bbox_sampler_human.sample(
+                        assign_result_human,
+                        proposal_list_human[j],
+                        gt_bboxes[j],
+                        gt_labels[j],
+                        feats=[lvl_feat[j][None] for lvl_feat in x])
+                    sampling_results_human.append(sampling_result_human)
+                    assign_result_vehicle = bbox_assigner_vehicle.assign(
+                        proposal_list_vehicle[j], gt_bboxes[j], gt_bboxes_ignore[j],
+                        gt_labels[j])
+                    sampling_result_vehicle = bbox_sampler_vehicle.sample(
+                        assign_result_vehicle,
+                        proposal_list_vehicle[j],
+                        gt_bboxes[j],
+                        gt_labels[j],
+                        feats=[lvl_feat[j][None] for lvl_feat in x])
+                    sampling_results_vehicle.append(sampling_result_vehicle)
+                    assign_result_two = bbox_assigner_two.assign(
+                        proposal_list_two[j], gt_bboxes[j], gt_bboxes_ignore[j],
+                        gt_labels[j])
+                    sampling_result_two = bbox_sampler_two.sample(
+                        assign_result_two,
+                        proposal_list_two[j],
+                        gt_bboxes[j],
+                        gt_labels[j],
+                        feats=[lvl_feat[j][None] for lvl_feat in x])
+                    sampling_results_two.append(sampling_result_two)
+                    assign_result_three = bbox_assigner_three.assign(
+                        proposal_list_three[j], gt_bboxes[j], gt_bboxes_ignore[j],
+                        gt_labels[j])
+                    sampling_result_three = bbox_sampler_three.sample(
+                        assign_result_three,
+                        proposal_list_three[j],
+                        gt_bboxes[j],
+                        gt_labels[j],
+                        feats=[lvl_feat[j][None] for lvl_feat in x])
+                    sampling_results_three.append(sampling_result_three)
             # bbox head forward and loss
-            bbox_results = self._bbox_forward_train(i, x, sampling_results,
-                                                    gt_bboxes, gt_labels,
-                                                    rcnn_train_cfg)
+            bbox_results_bg, bbox_results_human, bbox_results_vehicle, bbox_results_two, bbox_results_three = self._bbox_forward_train(i, x, sampling_results_bg, sampling_results_human, sampling_results_vehicle, sampling_results_two, sampling_results_three,
+                                                                       gt_bboxes, gt_labels,
+                                                                       rcnn_train_cfg)
 
-            for name, value in bbox_results['loss_bbox'].items():
-                losses[f's{i}.{name}'] = (
-                    value * lw if 'loss' in name else value)
-
-            # mask head forward and loss
-            if self.with_mask:
-                mask_results = self._mask_forward_train(
-                    i, x, sampling_results, gt_masks, rcnn_train_cfg,
-                    bbox_results['bbox_feats'])
-                for name, value in mask_results['loss_mask'].items():
-                    losses[f's{i}.{name}'] = (
-                        value * lw if 'loss' in name else value)
+            for name, value in bbox_results_bg['loss_bbox'].items():
+                losses[f's{i}.bg.{name}'] = (value * lw if 'loss' in name else value)
+            for name, value in bbox_results_human['loss_bbox'].items():
+                losses[f's{i}.human.{name}'] = (value * lw if 'loss' in name else value)
+            for name, value in bbox_results_vehicle['loss_bbox'].items():
+                losses[f's{i}.vehicle.{name}'] = (value * lw if 'loss' in name else value)
+            for name, value in bbox_results_two['loss_bbox'].items():
+                losses[f's{i}.two.{name}'] = (value * lw if 'loss' in name else value)
+            for name, value in bbox_results_three['loss_bbox'].items():
+                losses[f's{i}.three.{name}'] = (value * lw if 'loss' in name else value)
 
             # refine bboxes
             if i < self.num_stages - 1:
-                pos_is_gts = [res.pos_is_gt for res in sampling_results]
+                pos_is_gts = [res.pos_is_gt for res in sampling_results_bg]
+                pos_is_gts_human = [res.pos_is_gt for res in sampling_results_human]
+                pos_is_gts_vehicle = [res.pos_is_gt for res in sampling_results_vehicle]
+                pos_is_gts_two = [res.pos_is_gt for res in sampling_results_two]
+                pos_is_gts_three = [res.pos_is_gt for res in sampling_results_three]
                 # bbox_targets is a tuple
-                roi_labels = bbox_results['bbox_targets'][0]
+                roi_labels = bbox_results_bg['bbox_targets'][0]
+                roi_labels_human = bbox_results_human['bbox_targets'][0]
+                roi_labels_vehicle = bbox_results_vehicle['bbox_targets'][0]
+                roi_labels_two = bbox_results_two['bbox_targets'][0]
+                roi_labels_three = bbox_results_three['bbox_targets'][0]
+
                 with torch.no_grad():
                     roi_labels = torch.where(
                         roi_labels == self.bbox_head[i].num_classes,
-                        bbox_results['cls_score'][:, :-1].argmax(1),
+                        bbox_results_bg['cls_score'][:, :-1].argmax(1),
                         roi_labels)
                     proposal_list = self.bbox_head[i].refine_bboxes(
-                        bbox_results['rois'], roi_labels,
-                        bbox_results['bbox_pred'], pos_is_gts, img_metas)
+                        bbox_results_bg['rois'], roi_labels,
+                        bbox_results_bg['bbox_pred'], pos_is_gts, img_metas)
+                    roi_labels_human = torch.where(
+                        roi_labels_human == self.bbox_head[i].num_classes,
+                        bbox_results_human['cls_score'][:, :-1].argmax(1),
+                        roi_labels_human)
+                    proposal_list_human = self.bbox_head[i].refine_bboxes(
+                        bbox_results_human['rois'], roi_labels_human,
+                        bbox_results_human['bbox_pred'], pos_is_gts_human, img_metas)
+                    roi_labels_vehicle = torch.where(
+                        roi_labels_vehicle == self.bbox_head[i].num_classes,
+                        bbox_results_vehicle['cls_score'][:, :-1].argmax(1),
+                        roi_labels_vehicle)
+                    proposal_list_vehicle = self.bbox_head[i].refine_bboxes(
+                        bbox_results_vehicle['rois'], roi_labels_vehicle,
+                        bbox_results_vehicle['bbox_pred'], pos_is_gts_vehicle, img_metas)
+                    roi_labels_two = torch.where(
+                        roi_labels_two == self.bbox_head[i].num_classes,
+                        bbox_results_two['cls_score'][:, :-1].argmax(1),
+                        roi_labels_two)
+                    proposal_list_two = self.bbox_head[i].refine_bboxes(
+                        bbox_results_two['rois'], roi_labels_two,
+                        bbox_results_two['bbox_pred'], pos_is_gts_two, img_metas)
+                    roi_labels_three = torch.where(
+                        roi_labels_three == self.bbox_head[i].num_classes,
+                        bbox_results_three['cls_score'][:, :-1].argmax(1),
+                        roi_labels_three)
+                    proposal_list_three = self.bbox_head[i].refine_bboxes(
+                        bbox_results_three['rois'], roi_labels_three,
+                        bbox_results_three['bbox_pred'], pos_is_gts_three, img_metas)
 
         return losses
 
@@ -288,7 +301,6 @@ class ForestCascadeRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
         ms_bbox_result = {}
         ms_segm_result = {}
         ms_scores = []
-        ms_scores_root = []
         rcnn_test_cfg = self.test_cfg
 
         rois = bbox2roi(proposal_list)
@@ -297,20 +309,17 @@ class ForestCascadeRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
 
             # split batch bbox prediction back to each image
             cls_score = bbox_results['cls_score']
-            cls_score_root = bbox_results['cls_score_root']
             bbox_pred = bbox_results['bbox_pred']
             num_proposals_per_img = tuple(
                 len(proposals) for proposals in proposal_list)
             rois = rois.split(num_proposals_per_img, 0)
             cls_score = cls_score.split(num_proposals_per_img, 0)
-            cls_score_root = cls_score_root.split(num_proposals_per_img, 0)
             if isinstance(bbox_pred, torch.Tensor):
                 bbox_pred = bbox_pred.split(num_proposals_per_img, 0)
             else:
                 bbox_pred = self.bbox_head[i].bbox_pred_split(
                     bbox_pred, num_proposals_per_img)
             ms_scores.append(cls_score)
-            ms_scores_root.append(cls_score_root)
 
             if i < self.num_stages - 1:
                 bbox_label = [s[:, :-1].argmax(dim=1) for s in cls_score]
@@ -326,10 +335,6 @@ class ForestCascadeRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
             sum([score[i] for score in ms_scores]) / float(len(ms_scores))
             for i in range(num_imgs)
         ]
-        cls_score_root = [
-            sum([score[i] for score in ms_scores_root]) / float(len(ms_scores_root))
-            for i in range(num_imgs)
-        ]
 
         # apply bbox post-processing to each image individually
         det_bboxes = []
@@ -338,7 +343,6 @@ class ForestCascadeRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
             det_bbox, det_label = self.bbox_head[-1].get_bboxes(
                 rois[i],
                 cls_score[i],
-                cls_score_root[i],
                 bbox_pred[i],
                 img_shapes[i],
                 scale_factors[i],
@@ -431,12 +435,11 @@ class ForestCascadeRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
                                      scale_factor, flip, flip_direction)
             # "ms" in variable names means multi-stage
             ms_scores = []
-            ms_scores_root = []
+
             rois = bbox2roi([proposals])
             for i in range(self.num_stages):
                 bbox_results = self._bbox_forward(i, x, rois)
                 ms_scores.append(bbox_results['cls_score'])
-                ms_scores_root.append(bbox_results['cls_score_root'])
 
                 if i < self.num_stages - 1:
                     bbox_label = bbox_results['cls_score'][:, :-1].argmax(
@@ -446,11 +449,9 @@ class ForestCascadeRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
                         img_meta[0])
 
             cls_score = sum(ms_scores) / float(len(ms_scores))
-            cls_score_root = sum(ms_scores_root) / float(len(ms_scores_root))
             bboxes, scores = self.bbox_head[-1].get_bboxes(
                 rois,
                 cls_score,
-                cls_score_root,
                 bbox_results['bbox_pred'],
                 img_shape,
                 scale_factor,

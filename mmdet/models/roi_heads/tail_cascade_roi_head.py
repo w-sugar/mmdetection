@@ -196,6 +196,7 @@ class TailCascadeRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
                       x,
                       img_metas,
                       proposal_list,
+                      proposal_list_tail,
                       gt_bboxes,
                       gt_labels,
                       gt_bboxes_ignore=None,
@@ -220,7 +221,7 @@ class TailCascadeRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
             dict[str, Tensor]: a dictionary of loss components
         """
         losses = dict()
-        proposal_list_tail = proposal_list.copy()
+        # proposal_list_tail = proposal_list.copy()
         # print(len(self.bbox_assigner))
         for i in range(self.num_stages):
             self.current_stage = i
@@ -558,10 +559,12 @@ class TailCascadeRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
             # aug_scores.append(det_labels)
             # print('c', det_bboxes.shape)
             # print('d', det_labels.shape)
-            aug_bboxes.append(bboxes)
-            aug_scores.append(scores)
-            aug_bboxes_tail.append(bboxes_tail)
-            aug_scores_tail.append(scores_tail)
+            det_bboxes = torch.cat((bboxes, bboxes_tail))
+            det_labels = torch.cat((scores, scores_tail))
+            aug_bboxes.append(det_bboxes)
+            aug_scores.append(det_labels)
+            # aug_bboxes_tail.append(bboxes_tail)
+            # aug_scores_tail.append(scores_tail)
 
         # after merging, bboxes will be rescaled to the original image size
         merged_bboxes, merged_scores = merge_aug_bboxes(
@@ -572,31 +575,31 @@ class TailCascadeRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
                                                 rcnn_test_cfg.nms,
                                                 rcnn_test_cfg.max_per_img)
 
-        # after merging, bboxes will be rescaled to the original image size
-        merged_bboxes_tail, merged_scores_tail = merge_aug_bboxes(
-            aug_bboxes_tail, aug_scores_tail, img_metas, rcnn_test_cfg)
-        # print('e', merged_bboxes.shape, merged_scores.shape)
-        det_bboxes_tail, det_labels_tail = multiclass_nms(merged_bboxes_tail, merged_scores_tail,
-                                                rcnn_test_cfg.score_thr,
-                                                rcnn_test_cfg.nms,
-                                                rcnn_test_cfg.max_per_img)
-        if self.labels is not None:
-            inds = []
-            for label in self.labels:
-                inds.append(torch.nonzero(det_labels == label, as_tuple=False).squeeze(1))
-            inds = torch.cat(inds)
-            det_bboxes_post = det_bboxes[inds]
-            det_labels_post = det_labels[inds]
-        if self.labels_tail is not None:
-            inds = []
-            for label in self.labels_tail:
-                inds.append(torch.nonzero(det_labels_tail == label, as_tuple=False).squeeze(1))
-            inds = torch.cat(inds)
-            det_bboxes_tail_post = det_bboxes_tail[inds]
-            det_labels_tail_post = det_labels_tail[inds]
+        # # after merging, bboxes will be rescaled to the original image size
+        # merged_bboxes_tail, merged_scores_tail = merge_aug_bboxes(
+        #     aug_bboxes_tail, aug_scores_tail, img_metas, rcnn_test_cfg)
+        # # print('e', merged_bboxes.shape, merged_scores.shape)
+        # det_bboxes_tail, det_labels_tail = multiclass_nms(merged_bboxes_tail, merged_scores_tail,
+        #                                         rcnn_test_cfg.score_thr,
+        #                                         rcnn_test_cfg.nms,
+        #                                         rcnn_test_cfg.max_per_img)
+        # if self.labels is not None:
+        #     inds = []
+        #     for label in self.labels:
+        #         inds.append(torch.nonzero(det_labels == label, as_tuple=False).squeeze(1))
+        #     inds = torch.cat(inds)
+        #     det_bboxes_post = det_bboxes[inds]
+        #     det_labels_post = det_labels[inds]
+        # if self.labels_tail is not None:
+        #     inds = []
+        #     for label in self.labels_tail:
+        #         inds.append(torch.nonzero(det_labels_tail == label, as_tuple=False).squeeze(1))
+        #     inds = torch.cat(inds)
+        #     det_bboxes_tail_post = det_bboxes_tail[inds]
+        #     det_labels_tail_post = det_labels_tail[inds]
 
-        det_bboxes = torch.cat((det_bboxes_post, det_bboxes_tail_post))
-        det_labels = torch.cat((det_labels_post, det_labels_tail_post))
+        # det_bboxes = torch.cat((det_bboxes_post, det_bboxes_tail_post))
+        # det_labels = torch.cat((det_labels_post, det_labels_tail_post))
 
         bbox_result = bbox2result(det_bboxes, det_labels,
                                   self.bbox_head[-1].num_classes)

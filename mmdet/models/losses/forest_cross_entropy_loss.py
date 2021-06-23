@@ -31,20 +31,20 @@ def cross_entropy(pred,
     # element-wise losses
     loss = F.cross_entropy(pred, label, weight=class_weight, reduction='none')
     # print(class_weight)
-    label_root = torch.tensor([0, 0, 1, 2, 2, 3, 4, 4, 3, 1, 5, 5], device=label.device)
+    label_root = torch.tensor([0, 0, 1, 2, 2, 2, 3, 3, 2, 1, 4, 4], device=label.device)
     label_root_post = label_root[label]
     loss_root = F.cross_entropy(pred_root, label_root_post, weight=class_weight, reduction='none')
     
-    parent_prob = F.softmax(pred_root, dim=1).repeat(1, 2)
-    parent_prob = parent_prob.index_select(-1, torch.tensor([0,6,1,2,8,3,4,10,9,7,5,11], device=parent_prob.device))
-    # pred_exp = torch.exp(pred) * parent_prob
-    # den = torch.sum(pred_exp, 1, keepdim=True)
-    # pred_softmax = pred_exp / (den + 1e-7)
-    # oneHot = F.one_hot(label, 12).to(device=label.device)
-    # loss_cascade = pred_softmax * oneHot
-    # loss_cascade = -torch.sum(torch.log(torch.sum(loss_cascade, 1)))/(pred.shape[0] + 1e-7)
-    pred_cascade = parent_prob * pred
-    loss_cascade =  F.cross_entropy(pred_cascade, label, weight=class_weight, reduction='none')
+    parent_prob = F.softmax(pred_root, dim=1)
+    scores_root = parent_prob[:, label_root]
+    pred_exp = torch.exp(pred) * scores_root
+    den = torch.sum(pred_exp, 1, keepdim=True)
+    pred_softmax = pred_exp / (den + 1e-7)
+    oneHot = F.one_hot(label, 12).to(device=label.device)
+    loss_cascade = pred_softmax * oneHot
+    loss_cascade = -torch.sum(torch.log(torch.sum(loss_cascade, 1)))/(pred.shape[0] + 1e-7)
+    # pred_cascade = parent_prob * pred
+    # loss_cascade =  F.cross_entropy(pred_cascade, label, weight=class_weight, reduction='none')
 
     # apply weights and do the reduction
     if weight is not None:
@@ -162,7 +162,7 @@ def mask_cross_entropy(pred,
 
 
 @LOSSES.register_module()
-class CrossEntropyLoss(nn.Module):
+class ForestCrossEntropyLoss(nn.Module):
 
     def __init__(self,
                  use_sigmoid=False,
@@ -183,7 +183,7 @@ class CrossEntropyLoss(nn.Module):
                 Defaults to None.
             loss_weight (float, optional): Weight of the loss. Defaults to 1.0.
         """
-        super(CrossEntropyLoss, self).__init__()
+        super(ForestCrossEntropyLoss, self).__init__()
         assert (use_sigmoid is False) or (use_mask is False)
         self.use_sigmoid = use_sigmoid
         self.use_mask = use_mask

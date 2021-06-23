@@ -10,7 +10,7 @@ from mmdet.models.losses import accuracy
 
 
 @HEADS.register_module()
-class BBoxHead(BaseModule):
+class ForestBBoxHead(BaseModule):
     """Simplest RoI head, with only two fc layers for classification and
     regression respectively."""
 
@@ -35,7 +35,7 @@ class BBoxHead(BaseModule):
                  loss_bbox=dict(
                      type='SmoothL1Loss', beta=1.0, loss_weight=1.0),
                  init_cfg=None):
-        super(BBoxHead, self).__init__(init_cfg)
+        super(ForestBBoxHead, self).__init__(init_cfg)
         assert with_cls or with_reg
         self.with_avg_pool = with_avg_pool
         self.with_cls = with_cls
@@ -326,18 +326,20 @@ class BBoxHead(BaseModule):
         if isinstance(cls_score, list):
             cls_score = sum(cls_score) / float(len(cls_score))
         if self.use_wordtree_cls != 'WordTreeFocalLoss':
-            # scores = F.softmax(
-            #     cls_score, dim=-1) if cls_score is not None else None
-
+            scores = F.softmax(
+                cls_score, dim=-1) if cls_score is not None else None
+            '''
             scores_root = F.softmax(
                 cls_score_root, dim=-1) if cls_score_root is not None else None
-            scores_11_16 = scores_root.repeat(1, 2)
-            scores_11_16 = scores_11_16.index_select(-1, torch.tensor([0,6,1,2,8,3,4,10,9,7,5,11], device=cls_score.device))
-            # scores = torch.exp(cls_score) * scores_11_16
+            forest_structure = torch.tensor([0, 0, 1, 2, 2, 2, 3, 3, 2, 1, 4, 4], device=cls_score.device)
+            scores_root = scores_root[:, forest_structure]
+            # scores_11_16 = scores_11_16.index_select(-1, torch.tensor([0,5,1,2,8,3,4,10,9,7,5,11], device=cls_score.device))
+            scores = torch.exp(cls_score) * scores_root
             # # scores = F.softmax(scores, dim=-1)
-            # den = torch.sum(scores, 1, keepdim=True)
-            # scores = scores / den
-            scores = F.softmax(cls_score * scores_11_16, dim=-1) if cls_score_root is not None else None
+            den = torch.sum(scores, 1, keepdim=True)
+            scores = scores / den
+            '''
+            # scores = F.softmax(cls_score * scores_11_16, dim=-1) if cls_score_root is not None else None
         else:
             #sigmoid
             scores = F.sigmoid(

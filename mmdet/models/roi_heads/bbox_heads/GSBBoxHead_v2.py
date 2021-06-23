@@ -11,15 +11,15 @@ from .convfc_bbox_head import Shared2FCBBoxHead
 import numpy as np
 
 @HEADS.register_module()
-class GSBBoxHeadWith(Shared2FCBBoxHead):
+class GSBBoxHeadWithV2(Shared2FCBBoxHead):
     """Simplest RoI head, with only two fc layers for classification and
     regression respectively."""
 
     def __init__(self, gs_config=None, *args, **kwargs):
-        super(GSBBoxHeadWith, self).__init__(*args,**kwargs)
+        super(GSBBoxHeadWithV2, self).__init__(*args,**kwargs)
 
-        # self.fc_cls = nn.Linear(self.cls_last_dim,
-        #                         self.num_classes + 5)
+        self.fc_cls = nn.Linear(self.cls_last_dim,
+                                self.num_classes + 5)
         # self.label2binlabel = [torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]),
         #                         torch.tensor([0, 1, 5, 2, 3, 5, 5, 5, 5, 4, 5, 5]),
         #                         torch.tensor([6, 6, 0, 6, 6, 1, 2, 3, 4, 6, 5, 6])]
@@ -32,10 +32,6 @@ class GSBBoxHeadWith(Shared2FCBBoxHead):
                                 torch.tensor([4, 4, 4, 0, 1, 2, 4, 4, 3, 4, 4, 4]),
                                 torch.tensor([2, 2, 0, 2, 2, 2, 2, 2, 2, 1, 2, 2]),
                                 torch.tensor([2, 2, 2, 2, 2, 2, 0, 1, 2, 2, 2, 2])]
-        # self.label2binlabel = [torch.tensor([0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]),
-        #                         torch.tensor([4, 4, 4, 0, 1, 2, 4, 4, 3, 4, 4, 4]),
-        #                         torch.tensor([2, 2, 0, 2, 2, 2, 2, 2, 2, 1, 2, 2]),
-        #                         torch.tensor([2, 2, 2, 2, 2, 2, 0, 1, 2, 2, 2, 2])]
         # self.pred_slice = [
         #     [0, 2],
         #     [2, 6],
@@ -54,12 +50,6 @@ class GSBBoxHeadWith(Shared2FCBBoxHead):
             [10, 3],
             [13, 3]
         ]
-        # self.pred_slice = [
-        #     torch.tensor([0, 1]),
-        #     torch.tensor([3, 4, 5, 8]),
-        #     torch.tensor([2, 9]),
-        #     torch.tensor([6, 7])
-        # ]
         # self.fg_splits = [
         #     torch.tensor([0, 1, 3, 4, 9]),
         #     torch.tensor([2, 5, 6, 7, 8, 10])
@@ -80,49 +70,20 @@ class GSBBoxHeadWith(Shared2FCBBoxHead):
         for i in range(5):
             self.loss_bins.append(build_loss(gs_config.loss_bin))
 
-    def _remap_labels(self, labels):
+    def _remap_labels(self, labels, bin):
 
-        num_bins = 5
-        new_labels = []
-        new_weights = []
-        new_avg = []
-        for i in range(num_bins):
-            mapping = self.label2binlabel[i].to(device=labels.device)
-            new_bin_label = mapping[labels]
+        mapping = self.label2binlabel[bin].to(device=labels.device)
+        new_bin_label = mapping[labels]
 
-            if i < 1:
-                weight = torch.ones_like(new_bin_label)
-                # weight = torch.zeros_like(new_bin_label)
-            else:
-                weight = self._sample_others(new_bin_label, self.label2binlabel[i][-1])
-            new_labels.append(new_bin_label)
-            new_weights.append(weight)
+        if bin < 1:
+            weight = torch.ones_like(new_bin_label)
+            # weight = torch.zeros_like(new_bin_label)
+        else:
+            weight = self._sample_others(new_bin_label, self.label2binlabel[bin][-1])
 
-            avg_factor = max(torch.sum(weight).float().item(), 1.)
-            new_avg.append(avg_factor)
+        avg_factor = max(torch.sum(weight).float().item(), 1.)
 
-        return new_labels, new_weights, new_avg
-    # def _remap_labels(self, labels):
-
-    #     num_bins = 4
-    #     new_labels = []
-    #     new_weights = []
-    #     new_avg = []
-    #     for i in range(num_bins):
-    #         mapping = self.label2binlabel[i].to(device=labels.device)
-    #         new_bin_label = mapping[labels]
-
-    #         # weight = self._sample_others(new_bin_label, self.label2binlabel[i][-1])
-    #         weight = torch.where(new_bin_label < self.label2binlabel[i][-1], torch.ones_like(new_bin_label),
-    #                              torch.zeros_like(new_bin_label))
-    #         new_bin_label = torch.where(new_bin_label == self.label2binlabel[i][-1], torch.zeros_like(new_bin_label), new_bin_label)
-    #         new_labels.append(new_bin_label)
-    #         new_weights.append(weight)
-
-    #         avg_factor = max(torch.sum(weight).float().item(), 1.)
-    #         new_avg.append(avg_factor)
-
-    #     return new_labels, new_weights, new_avg
+        return new_bin_label, weight, avg_factor
 
     def _sample_others(self, label, length):
 
@@ -152,7 +113,15 @@ class GSBBoxHeadWith(Shared2FCBBoxHead):
 
         return weight
 
-    def _slice_preds(self, cls_score):
+    def _slice_preds(self, cls_score, bin):
+
+        start = self.pred_slice[bin][0]
+        length = self.pred_slice[bin][1]
+        sliced_pred = cls_score.narrow(1, start, length)
+
+        return sliced_pred
+    
+    def _slice_preds_all(self, cls_score):
 
         new_preds = []
 
@@ -164,22 +133,11 @@ class GSBBoxHeadWith(Shared2FCBBoxHead):
             new_preds.append(sliced_pred)
 
         return new_preds
-    # def _slice_preds(self, cls_score):
-
-    #     new_preds = []
-
-    #     num_bins = 4
-    #     for i in range(num_bins):
-    #         index_bin = self.pred_slice[i]
-    #         sliced_pred = cls_score.index_select(-1, index_bin.to(device=cls_score.device))
-    #         new_preds.append(sliced_pred)
-
-    #     return new_preds
 
     @force_fp32(apply_to=('cls_score', 'bbox_pred'))
     def loss(self,
+             bin,
              cls_score,
-             cls_gs_score,
              bbox_pred,
              rois,
              labels,
@@ -190,28 +148,17 @@ class GSBBoxHeadWith(Shared2FCBBoxHead):
         losses = dict()
 
         if cls_score is not None:
-            avg_factor = max(torch.sum(label_weights > 0).float().item(), 1.)
-            if cls_score.numel() > 0:
-                losses['loss_cls'] = self.loss_cls(
-                    cls_score,
-                    labels,
-                    label_weights,
-                    avg_factor=avg_factor,
-                    reduction_override=reduction_override)
-                losses['acc'] = accuracy(cls_score, labels)
+            # Original label_weights is 1 for each roi.
+            new_labels, new_weights, new_avgfactors = self._remap_labels(labels, bin-1)
+            new_preds = self._slice_preds(cls_score, bin-1)
 
-                # Original label_weights is 1 for each roi.
-                new_labels, new_weights, new_avgfactors = self._remap_labels(labels)
-                new_preds = self._slice_preds(cls_gs_score)
-                num_bins = len(new_labels)
-                for i in range(num_bins):
-                    losses['loss_cls_bin{}'.format(i)] = self.loss_bins[i](
-                        new_preds[i],
-                        new_labels[i],
-                        new_weights[i],
-                        avg_factor=new_avgfactors[i],
-                        reduction_override=reduction_override
-                    )
+            losses['loss_cls_{}'.format(bin)] = self.loss_bins[bin-1](
+                new_preds,
+                new_labels,
+                new_weights,
+                avg_factor=new_avgfactors,
+                reduction_override=reduction_override
+            )
 
         if bbox_pred is not None:
             bg_class_ind = self.num_classes
@@ -254,7 +201,7 @@ class GSBBoxHeadWith(Shared2FCBBoxHead):
 
         num_proposals = cls_score.shape[0]
 
-        new_preds = self._slice_preds(cls_score)
+        new_preds = self._slice_preds_all(cls_score)
         new_scores = [F.softmax(pred, dim=1) for pred in new_preds]
 
         bg_score = new_scores[0]
@@ -281,7 +228,7 @@ class GSBBoxHeadWith(Shared2FCBBoxHead):
         return merge
 
     @force_fp32(apply_to=('cls_score', 'bbox_pred'))
-    def get_bboxes_new(self,
+    def get_bboxes(self,
                    rois,
                    cls_score,
                    bbox_pred,
@@ -291,7 +238,9 @@ class GSBBoxHeadWith(Shared2FCBBoxHead):
                    cfg=None):
         if isinstance(cls_score, list):
             cls_score = sum(cls_score) / float(len(cls_score))
-        scores = self._merge_score(cls_score)
+        # scores = self._merge_score(cls_score)
+        scores = cls_score.index_select(-1, torch.tensor([2,3,10,5,6,7,13,14,8,11,1,1], device=cls_score.device))
+        scores = F.softmax(scores, dim=-1)
 
         batch_mode = True
         if rois.ndim == 2:
