@@ -87,6 +87,8 @@ model = dict(
                 #     gamma=2.0,
                 #     alpha=0.25,
                 #     loss_weight=1.0),
+                # reg_decoded_bbox=True,
+                # loss_bbox=dict(type='GIoULoss', loss_weight=10.0)),
                 loss_bbox=dict(type='SmoothL1Loss', beta=1.0,
                                loss_weight=1.0)),
             dict(
@@ -111,6 +113,8 @@ model = dict(
                 #     gamma=2.0,
                 #     alpha=0.25,
                 #     loss_weight=1.0),
+                # reg_decoded_bbox=True,
+                # loss_bbox=dict(type='GIoULoss', loss_weight=10.0)),
                 loss_bbox=dict(type='SmoothL1Loss', beta=1.0,
                                loss_weight=1.0)),
             dict(
@@ -135,6 +139,8 @@ model = dict(
                 #     gamma=2.0,
                 #     alpha=0.25,
                 #     loss_weight=1.0),
+                # reg_decoded_bbox=True,
+                # loss_bbox=dict(type='GIoULoss', loss_weight=10.0))
                 loss_bbox=dict(type='SmoothL1Loss', beta=1.0, loss_weight=1.0))
         ]),
     # model training and testing settings
@@ -158,7 +164,7 @@ model = dict(
             debug=False),
         rpn_proposal=dict(
             nms_pre=2000,
-            max_per_img=3000, #2000,
+            max_per_img=2000, #2000,
             nms=dict(type='nms', iou_threshold=0.7),
             min_bbox_size=0),
         rcnn=[
@@ -172,7 +178,7 @@ model = dict(
                     ignore_iof_thr=-1),
                 sampler=dict(
                     type='RandomSampler',
-                    num=738, #512,
+                    num=512, #512,
                     pos_fraction=0.25,
                     neg_pos_ub=-1,
                     add_gt_as_proposals=True),
@@ -188,7 +194,7 @@ model = dict(
                     ignore_iof_thr=-1),
                 sampler=dict(
                     type='RandomSampler',
-                    num=738, #512,
+                    num=512, #512,
                     pos_fraction=0.25,
                     neg_pos_ub=-1,
                     add_gt_as_proposals=True),
@@ -204,7 +210,7 @@ model = dict(
                     ignore_iof_thr=-1),
                 sampler=dict(
                     type='RandomSampler',
-                    num=738, #512,
+                    num=512, #512,
                     pos_fraction=0.25,
                     neg_pos_ub=-1,
                     add_gt_as_proposals=True),
