@@ -226,7 +226,7 @@ def train_detector(model,
             assign_result = assigner.assign(
                 anchors.cpu(), gt_bboxes[0][0], gt_bboxes_ignore_list[0],
                 None)
-            print(assign_result.pos_gt_bboxes)
+            # print(assign_result.pos_gt_bboxes)
             pos_inds = torch.nonzero(assign_result.gt_inds > 0, as_tuple=False)
             labels = anchors.new_full((anchors.shape[0], ),
                                   -1,

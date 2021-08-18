@@ -7,6 +7,99 @@ import pycocotools.mask as maskUtils
 from mmdet.core import BitmapMasks, PolygonMasks
 from ..builder import PIPELINES
 
+@PIPELINES.register_module()
+class LoadClipFromFile(object):
+    """Load an image from file.
+
+    Required keys are "img_prefix" and "img_info" (a dict that must contain the
+    key "filename"). Added or updated keys are "filename", "img", "img_shape",
+    "ori_shape" (same as `img_shape`), "pad_shape" (same as `img_shape`),
+    "scale_factor" (1.0) and "img_norm_cfg" (means=0 and stds=1).
+
+    Args:
+        to_float32 (bool): Whether to convert the loaded image to a float32
+            numpy array. If set to False, the loaded image is an uint8 array.
+            Defaults to False.
+        color_type (str): The flag argument for :func:`mmcv.imfrombytes`.
+            Defaults to 'color'.
+        file_client_args (dict): Arguments to instantiate a FileClient.
+            See :class:`mmcv.fileio.FileClient` for details.
+            Defaults to ``dict(backend='disk')``.
+    """
+
+    def __init__(self,
+                 to_float32=False,
+                 color_type='color',
+                 img_format='frame_{:09d}.jpg',
+                 total_frames=32,
+                 frame_interval=4,
+                 file_client_args=dict(backend='disk')):
+        self.to_float32 = to_float32
+        self.color_type = color_type
+        self.img_format = img_format
+        self.total_frames = total_frames
+        self.frame_interval = frame_interval
+        self.file_client_args = file_client_args.copy()
+        self.file_client = None
+
+    def __call__(self, results):
+        """Call functions to load image and get image meta information.
+
+        Args:
+            results (dict): Result dict from :obj:`mmdet.CustomDataset`.
+
+        Returns:
+            dict: The dict contains loaded image and meta information.
+        """
+
+        if self.file_client is None:
+            self.file_client = mmcv.FileClient(**self.file_client_args)
+
+        first_frame_id = int(results['img_info']['frame_id'])
+        if results['img_prefix'] is not None:
+            filename = osp.join(results['img_prefix'],
+                                results['img_info']['filename'])
+            videoname = osp.join(results['img_prefix'],
+                                results['img_info']['video_name'])
+        else:
+            filename = results['img_info']['filename']
+            videoname = results['img_info']['video_name']
+        
+        read_format = osp.join(videoname, self.img_format)
+        imgs = list()
+        for ind in range(first_frame_id, first_frame_id + self.total_frames, self.frame_interval):
+            current_img = read_format.format(ind)
+            if ind == 0:
+                ind += 1
+                current_img = read_format.format(ind)
+            else:
+                while not osp.exists(current_img):
+                    ind -= 1
+                    current_img = read_format.format(ind)
+
+            img_bytes = self.file_client.get(current_img)
+            img = mmcv.imfrombytes(img_bytes, flag=self.color_type)
+
+            if self.to_float32:
+                img = img.astype(np.float32)
+
+            imgs.append(img)
+
+        results['filename'] = filename
+        results['ori_filename'] = results['img_info']['filename']
+        results['img'] = imgs
+        results['img_shape'] = img.shape
+        results['ori_shape'] = img.shape
+        results['img_fields'] = ['img']
+            
+        return results
+
+    def __repr__(self):
+        repr_str = (f'{self.__class__.__name__}('
+                    f'to_float32={self.to_float32}, '
+                    f"color_type='{self.color_type}', "
+                    f'file_client_args={self.file_client_args})')
+        return repr_str
 
 @PIPELINES.register_module()
 class LoadImageFromFile(object):
@@ -67,6 +160,33 @@ class LoadImageFromFile(object):
         results['img_shape'] = img.shape
         results['ori_shape'] = img.shape
         results['img_fields'] = ['img']
+        new_additional_data = []
+        if 'additional_imgs' in results.keys():
+            for additional_img in results['additional_imgs']:
+                if self.file_client is None:
+                    self.file_client = mmcv.FileClient(**self.file_client_args)
+
+                if additional_img['img_prefix'] is not None:
+                    filename = osp.join(additional_img['img_prefix'],
+                                        additional_img['img_info']['filename'])
+                else:
+                    filename = additional_img['img_info']['filename']
+
+                img_bytes = self.file_client.get(filename)
+                img = mmcv.imfrombytes(img_bytes, flag=self.color_type)
+                if self.to_float32:
+                    img = img.astype(np.float32)
+
+                additional_img['filename'] = filename
+                additional_img['ori_filename'] = additional_img['img_info']['filename']
+                additional_img['img'] = img
+                additional_img['img_shape'] = img.shape
+                additional_img['ori_shape'] = img.shape
+                additional_img['img_fields'] = ['img']
+
+                new_additional_data.append(additional_img)
+            results['additional_imgs'] = new_additional_data
+            
         return results
 
     def __repr__(self):
@@ -371,6 +491,21 @@ class LoadAnnotations(object):
             results = self._load_masks(results)
         if self.with_seg:
             results = self._load_semantic_seg(results)
+        new_additional_data = []
+        if 'additional_imgs' in results.keys():
+            for additional_img in results['additional_imgs']:
+                if self.with_bbox:
+                    additional_img = self._load_bboxes(additional_img)
+                    if additional_img is None:
+                        return None
+                if self.with_label:
+                    additional_img = self._load_labels(additional_img)
+                if self.with_mask:
+                    additional_img = self._load_masks(additional_img)
+                if self.with_seg:
+                    additional_img = self._load_semantic_seg(additional_img)
+                new_additional_data.append(additional_img)
+            results['additional_imgs'] = new_additional_data
         return results
 
     def __repr__(self):

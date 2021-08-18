@@ -222,6 +222,7 @@ class ExtraMask(BaseModule):
         #     padding=0,
         #     norm_cfg=dict(type='BN', requires_grad=True)
         # )
+        '''
         if with_mask_pooling:
             self.maskROIConv = nn.Sequential(
                 ConvModule(
@@ -254,6 +255,7 @@ class ExtraMask(BaseModule):
             if with_mask_cac:
                 self.spatial_attention_conv=nn.Sequential(nn.Conv2d(in_channels*2, in_channels, 1), nn.ReLU(), nn.Conv2d(in_channels,2,3, padding=1))
                 # self.channel_attention_conv=nn.Sequential(nn.AdaptiveAvgPool2d((1,1)), nn.Conv2d(in_channels*2, in_channels, 1), nn.ReLU(), nn.Conv2d(in_channels, in_channels*2, 1))
+        '''
         # self.loss_mask = SmoothL1Loss(beta=1.0 / 9.0, loss_weight=1.0)
         self.loss_mask = torch.nn.MSELoss()
         # self.loss_mask = FocalLoss()
@@ -309,30 +311,32 @@ class ExtraMask(BaseModule):
             # upsample1 = self.upsamplev1(mask3)
             # upsample2 = self.upsamplev2(upsample1)
             if self.with_mask_pooling:
-                maskROI = self.maskROIConv(mask1) + mask1
-                maskROI = self.mask_upsample(maskROI)
-                if self.with_mask_cac:
-                    fusion_feature = torch.cat([out, maskROI], dim=1)
-                    '''
-                    channel_attention_conv = F.sigmoid(self.channel_attention_conv(fusion_feature))
-                    feats_post = channel_attention_conv * fusion_feature
-                    feats_x, feats_mask = torch.split(feats_post, [256, 256], 1)
-                    outs_upsample.append(feats_x + feats_mask)
-                    '''
-                    spatial_attention_conv = F.sigmoid(self.spatial_attention_conv(fusion_feature))
-                    feats_post = spatial_attention_conv[:, 0, None, :, :] * out + spatial_attention_conv[:, 1, None, :, :] * maskROI
-                    outs_upsample.append(feats_post)
-                    # channel_attention_conv = F.sigmoid(self.channel_attention_conv(fusion_feature))
-                    # feats_post = channel_attention_conv * fusion_feature
-                    # feats_x, feats_mask = torch.split(channel_attention_conv, [256, 256], 1)
+                outs_upsample.append(out)
+                # maskROI = self.maskROIConv(mask1) + mask1
+                # maskROI = self.mask_upsample(maskROI)
+                # if self.with_mask_cac:
+                #     fusion_feature = torch.cat([out, maskROI], dim=1)
+                #     '''
+                #     channel_attention_conv = F.sigmoid(self.channel_attention_conv(fusion_feature))
+                #     feats_post = channel_attention_conv * fusion_feature
+                #     feats_x, feats_mask = torch.split(feats_post, [256, 256], 1)
+                #     outs_upsample.append(feats_x + feats_mask)
+                #     '''
+                #     spatial_attention_conv = F.sigmoid(self.spatial_attention_conv(fusion_feature))
+                #     feats_post = spatial_attention_conv[:, 0, None, :, :] * out + spatial_attention_conv[:, 1, None, :, :] * maskROI
+                #     outs_upsample.append(feats_post)
+                #     # channel_attention_conv = F.sigmoid(self.channel_attention_conv(fusion_feature))
+                #     # feats_post = channel_attention_conv * fusion_feature
+                #     # feats_x, feats_mask = torch.split(channel_attention_conv, [256, 256], 1)
 
-                    # spatial_attention_conv = F.sigmoid(self.spatial_attention_conv(fusion_feature))
-                    # feats_post = spatial_attention_conv[:, 0, None, :, :] * out * feats_x + spatial_attention_conv[:, 1, None, :, :] * maskROI * feats_mask
-                    # outs_upsample.append(feats_post)
-                else:
-                    outs_upsample.append(maskROI)
+                #     # spatial_attention_conv = F.sigmoid(self.spatial_attention_conv(fusion_feature))
+                #     # feats_post = spatial_attention_conv[:, 0, None, :, :] * out * feats_x + spatial_attention_conv[:, 1, None, :, :] * maskROI * feats_mask
+                #     # outs_upsample.append(feats_post)
+                # else:
+                #     outs_upsample.append(maskROI)
+                
             # outs[i] = torch.cat([out, upsample2], dim=1)
-        loss_mask = sum(loss_mask) * 1.5
+        loss_mask = sum(loss_mask)
         # loss_ssim = sum(loss_ssim) * 0.01
 
         if self.with_mask_pooling:

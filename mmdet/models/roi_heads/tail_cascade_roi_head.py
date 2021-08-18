@@ -152,10 +152,10 @@ class TailCascadeRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
         bbox_feats = bbox_roi_extractor(x[:bbox_roi_extractor.num_inputs],
                                         rois)
         # do not support caffe_c4 model anymore
-        cls_score, bbox_pred = bbox_head(bbox_feats)
+        cls_score, cls_score_gs, bbox_pred = bbox_head(bbox_feats)
 
         bbox_results = dict(
-            cls_score=cls_score, bbox_pred=bbox_pred, bbox_feats=bbox_feats)
+            cls_score=cls_score, cls_score_gs=cls_score_gs, bbox_pred=bbox_pred, bbox_feats=bbox_feats)
         return bbox_results
 
     def _bbox_forward_tail(self, stage, x, rois):
@@ -165,10 +165,10 @@ class TailCascadeRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
         bbox_feats = bbox_roi_extractor(x[:bbox_roi_extractor.num_inputs],
                                         rois)
         # do not support caffe_c4 model anymore
-        cls_score, bbox_pred = bbox_head_tail(bbox_feats)
+        cls_score, cls_score_gs, bbox_pred = bbox_head_tail(bbox_feats)
 
         bbox_results = dict(
-            cls_score=cls_score, bbox_pred=bbox_pred, bbox_feats=bbox_feats)
+            cls_score=cls_score, cls_score_gs=cls_score_gs, bbox_pred=bbox_pred, bbox_feats=bbox_feats)
         return bbox_results
 
     def _bbox_forward_train(self, stage, x, sampling_results, sampling_results_tail, gt_bboxes,
@@ -179,6 +179,7 @@ class TailCascadeRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
         bbox_targets = self.bbox_head[stage].get_targets(
             sampling_results, gt_bboxes, gt_labels, rcnn_train_cfg)
         loss_bbox = self.bbox_head[stage].loss(bbox_results['cls_score'],
+                                               bbox_results['cls_score_gs'],
                                                bbox_results['bbox_pred'], rois,
                                                *bbox_targets)
         bbox_results.update(loss_bbox=loss_bbox, rois=rois, bbox_targets=bbox_targets)
@@ -187,6 +188,7 @@ class TailCascadeRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
         bbox_targets_tail = self.bbox_head_tail[stage].get_targets(sampling_results_tail, gt_bboxes,
                                                                    gt_labels, rcnn_train_cfg)
         loss_bbox_tail = self.bbox_head_tail[stage].loss(bbox_results_tail['cls_score'],
+                                                         bbox_results_tail['cls_score_gs'],
                                                          bbox_results_tail['bbox_pred'], rois_tail,
                                                          *bbox_targets_tail)
         bbox_results_tail.update(loss_bbox=loss_bbox_tail, rois=rois_tail, bbox_targets=bbox_targets_tail)
@@ -196,7 +198,7 @@ class TailCascadeRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
                       x,
                       img_metas,
                       proposal_list,
-                      proposal_list_tail,
+                    #   proposal_list_tail,
                       gt_bboxes,
                       gt_labels,
                       gt_bboxes_ignore=None,
@@ -221,7 +223,7 @@ class TailCascadeRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
             dict[str, Tensor]: a dictionary of loss components
         """
         losses = dict()
-        # proposal_list_tail = proposal_list.copy()
+        proposal_list_tail = proposal_list.copy()
         # print(len(self.bbox_assigner))
         for i in range(self.num_stages):
             self.current_stage = i
@@ -422,6 +424,10 @@ class TailCascadeRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
 
         bbox_results = []
         for i in range(num_imgs):
+            if det_bboxes_post[i].shape[0] == 0:
+                det_bboxes_post[i] = torch.zeros([0, 5]).to(device=det_bboxes_post[i].device)
+            if det_bboxes_tail_post[i].shape[0] == 0:
+                det_bboxes_tail_post[i] = torch.zeros([0, 5]).to(device=det_bboxes_tail_post[i].device)
             assert det_bboxes_post[i].shape[1] == det_bboxes_tail_post[i].shape[1], (det_bboxes_post[i].shape, det_bboxes_tail_post[i].shape)
             det_bboxes = torch.cat((det_bboxes_post[i], det_bboxes_tail_post[i]))
             det_labels = torch.cat((det_labels_post[i], det_labels_tail_post[i]))

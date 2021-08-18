@@ -98,6 +98,85 @@ class ImageToTensor(object):
     def __repr__(self):
         return self.__class__.__name__ + f'(keys={self.keys})'
 
+@PIPELINES.register_module()
+class FormatShape:
+    """Format final imgs shape to the given input_format.
+    Required keys are "imgs", "num_clips" and "clip_len", added or modified
+    keys are "imgs" and "input_shape".
+    Args:
+        input_format (str): Define the final imgs format.
+        collapse (bool): To collpase input_format N... to ... (NCTHW to CTHW,
+            etc.) if N is 1. Should be set as True when training and testing
+            detectors. Default: False.
+    """
+
+    def __init__(self, input_format, clip_len, collapse=False):
+        self.input_format = input_format
+        self.clip_len = clip_len
+        self.collapse = collapse
+        if self.input_format not in ['NCTHW', 'NCHW', 'NCHW_Flow', 'NPTCHW']:
+            raise ValueError(
+                f'The input format {self.input_format} is invalid.')
+
+    def __call__(self, results):
+        """Performs the FormatShape formating.
+        Args:
+            results (dict): The resulting dict to be modified and passed
+                to the next transform in pipeline.
+        """
+        if not isinstance(results['img'], np.ndarray):
+            results['img'] = np.array(results['img'])
+        imgs = results['img']
+        # [M x H x W x C]
+        # M = 1 * N_crops * N_clips * L
+
+        if self.input_format == 'NCTHW':
+            num_clips = 1
+            clip_len = self.clip_len
+
+            imgs = imgs.reshape((-1, num_clips, clip_len) + imgs.shape[1:])
+            # N_crops x N_clips x L x H x W x C
+            imgs = np.transpose(imgs, (0, 1, 5, 2, 3, 4))
+            # N_crops x N_clips x C x L x H x W
+            imgs = imgs.reshape((-1, ) + imgs.shape[2:])
+            # M' x C x L x H x W
+            # M' = N_crops x N_clips
+        elif self.input_format == 'NCHW':
+            imgs = np.transpose(imgs, (0, 3, 1, 2))
+            # M x C x H x W
+        elif self.input_format == 'NCHW_Flow':
+            num_clips = results['num_clips']
+            clip_len = results['clip_len']
+            imgs = imgs.reshape((-1, num_clips, clip_len) + imgs.shape[1:])
+            # N_crops x N_clips x L x H x W x C
+            imgs = np.transpose(imgs, (0, 1, 2, 5, 3, 4))
+            # N_crops x N_clips x L x C x H x W
+            imgs = imgs.reshape((-1, imgs.shape[2] * imgs.shape[3]) +
+                                imgs.shape[4:])
+            # M' x C' x H x W
+            # M' = N_crops x N_clips
+            # C' = L x C
+        elif self.input_format == 'NPTCHW':
+            num_proposals = results['num_proposals']
+            num_clips = results['num_clips']
+            clip_len = results['clip_len']
+            imgs = imgs.reshape((num_proposals, num_clips * clip_len) +
+                                imgs.shape[1:])
+            # P x M x H x W x C
+            # M = N_clips x L
+            imgs = np.transpose(imgs, (0, 1, 4, 2, 3))
+            # P x M x C x H x W
+        if self.collapse:
+            assert imgs.shape[0] == 1
+            imgs = imgs.squeeze(0)
+        results['img'] = imgs
+        results['input_shape'] = imgs.shape
+        return results
+
+    def __repr__(self):
+        repr_str = self.__class__.__name__
+        repr_str += f"(input_format='{self.input_format}')"
+        return repr_str
 
 @PIPELINES.register_module()
 class Transpose(object):
@@ -246,6 +325,79 @@ class DefaultFormatBundle(object):
     def __repr__(self):
         return self.__class__.__name__
 
+@PIPELINES.register_module()
+class DefaultFormatBundle3D(object):
+    """Default formatting bundle.
+
+    It simplifies the pipeline of formatting common fields, including "img",
+    "proposals", "gt_bboxes", "gt_labels", "gt_masks" and "gt_semantic_seg".
+    These fields are formatted as follows.
+
+    - img: (1)transpose, (2)to tensor, (3)to DataContainer (stack=True)
+    - proposals: (1)to tensor, (2)to DataContainer
+    - gt_bboxes: (1)to tensor, (2)to DataContainer
+    - gt_bboxes_ignore: (1)to tensor, (2)to DataContainer
+    - gt_labels: (1)to tensor, (2)to DataContainer
+    - gt_masks: (1)to tensor, (2)to DataContainer (cpu_only=True)
+    - gt_semantic_seg: (1)unsqueeze dim-0 (2)to tensor, \
+                       (3)to DataContainer (stack=True)
+    """
+
+    def __call__(self, results):
+        """Call function to transform and format common fields in results.
+
+        Args:
+            results (dict): Result dict contains the data to convert.
+
+        Returns:
+            dict: The result dict contains the data that is formatted with \
+                default bundle.
+        """
+        if 'img' in results:
+            img = results['img']
+            # add default meta keys
+            results = self._add_default_meta_keys(results)
+            if len(img.shape) < 3:
+                img = np.expand_dims(img, -1)
+            results['img'] = DC(to_tensor(img), stack=True)
+        for key in ['proposals', 'gt_bboxes', 'gt_bboxes_ignore', 'gt_labels']:
+            if key not in results:
+                continue
+            results[key] = DC(to_tensor(results[key]))
+        if 'gt_masks' in results:
+            results['gt_masks'] = DC(results['gt_masks'], cpu_only=True)
+        if 'gt_semantic_seg' in results:
+            results['gt_semantic_seg'] = DC(
+                to_tensor(results['gt_semantic_seg'][None, ...]), stack=True)
+        return results
+
+    def _add_default_meta_keys(self, results):
+        """Add default meta keys.
+
+        We set default meta keys including `pad_shape`, `scale_factor` and
+        `img_norm_cfg` to avoid the case where no `Resize`, `Normalize` and
+        `Pad` are implemented during the whole pipeline.
+
+        Args:
+            results (dict): Result dict contains the data to convert.
+
+        Returns:
+            results (dict): Updated result dict contains the data to convert.
+        """
+        img = results['img']
+        results.setdefault('pad_shape', img.shape)
+        results.setdefault('scale_factor', 1.0)
+        num_channels = 1 if len(img.shape) < 3 else img.shape[2]
+        results.setdefault(
+            'img_norm_cfg',
+            dict(
+                mean=np.zeros(num_channels, dtype=np.float32),
+                std=np.ones(num_channels, dtype=np.float32),
+                to_rgb=False))
+        return results
+
+    def __repr__(self):
+        return self.__class__.__name__
 
 @PIPELINES.register_module()
 class Collect(object):

@@ -1,4 +1,5 @@
 import torch
+import math
 import torch.nn as nn
 import torch.nn.functional as F
 from mmcv.runner import force_fp32
@@ -44,33 +45,6 @@ class SoftRoIExtractor(BaseRoIExtractor):
         target_lvls = target_lvls.clamp(min=0, max=num_levels - 1).long()
         return target_lvls
 
-    def roi_rescale(self, rois, num_levels, level):
-        """Scale RoI coordinates by scale factor.
-
-        Args:
-            rois (torch.Tensor): RoI (Region of Interest), shape (n, 5)
-            scale_factor (float): Scale factor that RoI will be multiplied by.
-
-        Returns:
-            torch.Tensor: Scaled RoI.
-        """
-        rois_lvls = torch.zeros(num_levels, rois.shape[0], 5)
-        for i in range(num_levels):
-            scale_factor = 2 ** (i - level)
-            cx = (rois[:, 1] + rois[:, 3]) * 0.5
-            cy = (rois[:, 2] + rois[:, 4]) * 0.5
-            w = rois[:, 3] - rois[:, 1]
-            h = rois[:, 4] - rois[:, 2]
-            new_w = w * scale_factor
-            new_h = h * scale_factor
-            x1 = cx - new_w * 0.5
-            x2 = cx + new_w * 0.5
-            y1 = cy - new_h * 0.5
-            y2 = cy + new_h * 0.5
-            new_rois = torch.stack((rois[:, 0], x1, y1, x2, y2), dim=-1)
-            rois_lvls[i] = new_rois
-        return rois_lvls
-
     @force_fp32(apply_to=('feats', ), out_fp16=True)
     def forward(self, feats, rois, roi_scale_factor=None):
         """Forward function."""
@@ -95,18 +69,7 @@ class SoftRoIExtractor(BaseRoIExtractor):
                 return roi_feats
             return self.roi_layers[0](feats[0], rois)
 
-        # target_lvls = self.map_roi_levels(rois, num_levels)
-
         target_lvls = self.map_roi_levels(rois, num_levels)
-        # roi_lvls = []
-        # for i in range(num_levels):
-        #     mask = target_lvls == i
-        #     inds = mask.nonzero(as_tuple=False).squeeze(1)
-        #     if inds.numel() > 0:
-        #         rois_ = rois[inds]
-        #         roi_lvl = self.roi_rescale(rois_, num_levels, i)
-        #         roi_lvls.append(roi_lvl)
-        # roi_lvls = torch.cat(roi_lvls, 1).to(device=rois.device)
         
         roi_feats_list_v = []
         roi_feats_list_q = []
@@ -118,13 +81,28 @@ class SoftRoIExtractor(BaseRoIExtractor):
                 q_i = max(0, i - 1)
                 k_i = min(num_levels-1, i+1)
                 rois_ = rois[inds]
-                roi_feats_v = self.roi_layers[i](feats[i], rois_).flatten(2).permute(2, 0, 1)
-                roi_feats_q = self.roi_layers[q_i](feats[q_i], rois_).flatten(2).permute(2, 0, 1)
-                roi_feats_k = self.roi_layers[k_i](feats[k_i], rois_).flatten(2).permute(2, 0, 1)
-                pro_features = self.self_attn1(roi_feats_q, roi_feats_k, value=roi_feats_v)[0]
+                roi_feats_v = self.roi_layers[i](feats[i], rois_)
+                roi_feats_q = self.roi_layers[q_i](feats[q_i], rois_)
+                roi_feats_k = self.roi_layers[k_i](feats[k_i], rois_)
+                # 生成pos emb
+                pos = self.PositionEmbeddingSine(roi_feats_v)
+                pos = pos.flatten(2).permute(2, 0, 1)
+
+                roi_feats_v = roi_feats_v.flatten(2).permute(2, 0, 1)
+                roi_feats_q = roi_feats_q.flatten(2).permute(2, 0, 1)
+                roi_feats_k = roi_feats_k.flatten(2).permute(2, 0, 1)
+                # 取平均
+                roi_feats_ = (roi_feats_v + roi_feats_q + roi_feats_k) / 3
+                # 加入pos emb
+                q = k = self.with_pos_embed(roi_feats_, pos)
+
+                # pro_features = self.self_attn1(roi_feats_q, roi_feats_k, value=roi_feats_v)[0]
+                # pro_features = roi_feats_v + self.dropout1(pro_features)
+                pro_features = self.self_attn1(q, k, value=roi_feats_)[0]
                 pro_features = roi_feats_v + self.dropout1(pro_features)
+
                 pro_features = self.norm1(pro_features)
-                pro_features = pro_features.permute(1, 2, 0).view(rois_.shape[0], 256, 7, 7)
+                pro_features = pro_features.permute(1, 2, 0).view(rois_.shape[0], 256, out_size[0], out_size[1])
 
                 roi_feats[inds] = pro_features
             else:
@@ -138,8 +116,31 @@ class SoftRoIExtractor(BaseRoIExtractor):
                     x.view(-1)[0]
                     for x in self.parameters()) * 0. + feats[i].sum() * 0.
 
-        # concat_roi_feats = torch.cat(roi_feats_list, dim=1)
-        # spatial_attention_map = self.spatial_attention_conv(concat_roi_feats)
-        # for i in range(num_levels):
-        #     roi_feats += (F.sigmoid(spatial_attention_map[:, i, None, :, :]) * roi_feats_list[i])
         return roi_feats
+    
+    @staticmethod
+    def with_pos_embed(tensor, pos):
+        return tensor if pos is None else tensor + pos
+
+    def PositionEmbeddingSine(self, x):
+        num_pos_feats=128
+        temperature=10000
+        mask = torch.zeros(x.shape[0], x.shape[2], x.shape[3], device=x.device) > 0
+        assert mask is not None
+        not_mask = ~mask
+        y_embed = not_mask.cumsum(1, dtype=torch.float32)
+        x_embed = not_mask.cumsum(2, dtype=torch.float32)
+        if True:
+            eps = 1e-6
+            y_embed = (y_embed - 0.5) / (y_embed[:, -1:, :] + eps) * 2 * math.pi
+            x_embed = (x_embed - 0.5) / (x_embed[:, :, -1:] + eps) * 2 * math.pi
+
+        dim_t = torch.arange(num_pos_feats, dtype=torch.float32, device=x.device)
+        dim_t = temperature ** (2 * (dim_t // 2) / num_pos_feats)
+
+        pos_x = x_embed[:, :, :, None] / dim_t
+        pos_y = y_embed[:, :, :, None] / dim_t
+        pos_x = torch.stack((pos_x[:, :, :, 0::2].sin(), pos_x[:, :, :, 1::2].cos()), dim=4).flatten(3)
+        pos_y = torch.stack((pos_y[:, :, :, 0::2].sin(), pos_y[:, :, :, 1::2].cos()), dim=4).flatten(3)
+        pos = torch.cat((pos_y, pos_x), dim=3).permute(0, 3, 1, 2)
+        return pos

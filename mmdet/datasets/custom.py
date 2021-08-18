@@ -62,7 +62,8 @@ class CustomDataset(Dataset):
                  seg_prefix=None,
                  proposal_file=None,
                  test_mode=False,
-                 filter_empty_gt=True):
+                 filter_empty_gt=True,
+                 if_mosaic=False):
         self.ann_file = ann_file
         self.data_root = data_root
         self.img_prefix = img_prefix
@@ -71,6 +72,7 @@ class CustomDataset(Dataset):
         self.test_mode = test_mode
         self.filter_empty_gt = filter_empty_gt
         self.CLASSES = self.get_classes(classes)
+        self.if_mosaic = if_mosaic
 
         # join paths if data_root is specified
         if self.data_root is not None:
@@ -86,6 +88,7 @@ class CustomDataset(Dataset):
                                               self.proposal_file)
         # load annotations (and proposals)
         self.data_infos = self.load_annotations(self.ann_file)
+        self.idx = range(len(self.data_infos))
 
         if self.proposal_file is not None:
             self.proposals = self.load_proposals(self.proposal_file)
@@ -214,6 +217,18 @@ class CustomDataset(Dataset):
         if self.proposals is not None:
             results['proposals'] = self.proposals[idx]
         self.pre_pipeline(results)
+        if self.if_mosaic:
+            import random
+            additional_ids = random.choices(self.idx, k=3)
+            additional_imgs = []
+            additional_anns = []
+            for additional_id in additional_ids:
+                img_info_add = self.data_infos[additional_id]
+                ann_info_add = self.get_ann_info(additional_id)
+                results_add = dict(img_info=img_info_add, ann_info=ann_info_add)
+                self.pre_pipeline(results_add)
+                additional_imgs.append(results_add)
+            results['additional_imgs'] = additional_imgs
         return self.pipeline(results)
 
     def prepare_test_img(self, idx):

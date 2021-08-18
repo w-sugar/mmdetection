@@ -12,8 +12,7 @@ class VisDroneDataset(CocoDataset):
                 'tricycle',
                 'awning-tricycle',
                 'bus',
-                'motor',
-                'others')
+                'motor',)
     # CLASSES = ( 'pedestrian',
     #             'people',
     #             'bicycle',
@@ -28,5 +27,4 @@ class VisDroneDataset(CocoDataset):
     #             'lianglun',
     #             'silun',
     #             'kache',
-    #             'sanlun',
-    #             'others')
+    #             'sanlun')

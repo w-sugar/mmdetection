@@ -158,7 +158,8 @@ class WordTreeFocalLoss(nn.Module):
         assert reduction_override in (None, 'none', 'mean', 'sum')
         reduction = (
             reduction_override if reduction_override else self.reduction)
-        multilabel = torch.tensor([11, 11, 12, 13, 13, 14, 15, 15, 14, 12, 10, 0, 0, 0, 0, 0, 16], device=target.device)
+        # multilabel = torch.tensor([11, 11, 12, 13, 13, 14, 15, 15, 14, 12, 10, 0, 0, 0, 0, 0, 16], device=target.device)
+        multilabel = torch.tensor([10, 10, 11, 12, 12, 13, 14, 14, 13, 11, 0, 0, 0, 0, 0, 15], device=target.device)
         target = torch.cat((target.unsqueeze(1), multilabel[target].unsqueeze(1)), 1)
         if self.use_sigmoid:
             # if torch.cuda.is_available() and pred.is_cuda:

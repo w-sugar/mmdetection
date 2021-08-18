@@ -37,7 +37,14 @@ class Compose(object):
         """
 
         for t in self.transforms:
-            data = t(data)
+            if t.__class__.__name__ == 'Resize' and 'additional_imgs' in data.keys():
+                data = t(data)
+                new_additional_data = []
+                for additional_img in data['additional_imgs']:
+                    new_additional_data.append(t(additional_img, data['scale'], data['scale_idx']))
+                data['additional_imgs'] = new_additional_data
+            else:
+                data = t(data)
             if data is None:
                 return None
         return data
