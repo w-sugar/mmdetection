@@ -13,7 +13,8 @@ from .voc import VOCDataset
 from .wider_face import WIDERFaceDataset
 from .xml_style import XMLDataset
 from .visdrone import VisDroneDataset
-from .virat import VIRATDataset
+from .virat import VIRATDataset, VIRATDataset2
+from .meva import MEVADataset
 
 __all__ = [
     'CustomDataset', 'XMLDataset', 'CocoDataset', 'DeepFashionDataset',
@@ -22,5 +23,5 @@ __all__ = [
     'DistributedSampler', 'build_dataloader', 'ConcatDataset', 'RepeatDataset',
     'ClassBalancedDataset', 'WIDERFaceDataset', 'DATASETS', 'PIPELINES',
     'build_dataset', 'replace_ImageToTensor', 'get_loading_pipeline',
-    'NumClassCheckHook', 'VisDroneDateset', 'VIRATDataset'
+    'NumClassCheckHook', 'VisDroneDateset', 'VIRATDataset', 'VIRATDataset2', 'MEVADataset'
 ]
